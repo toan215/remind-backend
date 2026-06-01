@@ -1,4 +1,5 @@
 const UserService = require("../services/userService");
+const { generateToken } = require("../utils/jwt");
 
 /**
  * Đăng ký tài khoản người dùng mới (Register User).
@@ -8,9 +9,13 @@ exports.register = async (req, res) => {
     const { email, password, displayName } = req.body;
     const user = await UserService.registerUser({ email, password, displayName });
     
+    // Tạo JWT token cho phiên đăng nhập mới
+    const token = generateToken(user._id, user.email);
+
     return res.status(201).json({
       message: "Đăng ký tài khoản thành công.",
       user: user.toResponse(),
+      token,
     });
   } catch (error) {
     return res.status(400).json({ error: error.message });
@@ -25,9 +30,13 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
     const user = await UserService.loginUser(email, password);
 
+    // Tạo JWT token sau khi xác thực thành công
+    const token = generateToken(user._id, user.email);
+
     return res.status(200).json({
       message: "Đăng nhập thành công.",
       user: user.toResponse(),
+      token,
     });
   } catch (error) {
     return res.status(401).json({ error: error.message });

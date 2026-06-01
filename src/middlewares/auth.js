@@ -1,7 +1,7 @@
-const { auth } = require("../configs/firebase");
+const jwt = require("jsonwebtoken");
 
 /**
- * Middleware xác thực người dùng bằng Firebase ID Token
+ * Middleware xác thực người dùng bằng JSON Web Token (JWT)
  */
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -16,11 +16,11 @@ const verifyToken = async (req, res, next) => {
   const token = authHeader.split(" ")[1];
 
   try {
-    // Xác thực ID Token được gửi từ client
-    const decodedToken = await auth.verifyIdToken(token);
+    // Xác thực token được gửi từ client sử dụng JWT_SECRET
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Đính kèm thông tin user được giải mã vào request object
-    req.user = decodedToken;
+    req.user = decoded;
     next();
   } catch (error) {
     console.error("Xác thực token thất bại:", error.message);

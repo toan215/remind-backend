@@ -1,45 +1,33 @@
-const { db } = require("../configs/firebase");
 const User = require("../models/user");
 const { hashPassword, comparePassword } = require("../utils/password");
-
-const COLLECTION_NAME = "users";
 
 class UserService {
   /**
    * Tạo tài khoản người dùng mới.
    * @param {Object} userData - Dữ liệu thô từ request body (email, password, displayName).
-   * @returns {Promise<User>} - Đối tượng User được tạo.
+   * @returns {Promise<User>} - Đối tượng User được tạo từ MongoDB.
    */
   static async registerUser(userData) {
-    // 1. Kiểm tra tính hợp lệ của Schema dữ liệu
+    // 1. Kiểm tra tính hợp lệ của Schema dữ liệu đầu vào
     User.validate(userData);
 
     const { email, password, displayName } = userData;
 
-    // 2. Kiểm tra trùng lặp email trong Firestore
-    const userSnapshot = await db
-      .collection(COLLECTION_NAME)
-      .where("email", "==", email)
-      .limit(1)
-      .get();
-      
-    if (!userSnapshot.empty) {
+    // 2. Kiểm tra trùng lặp email trong MongoDB
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
       throw new Error("Email đã được đăng ký.");
     }
 
-    // 3. Mã hóa mật khẩu thông qua helper utils/hash.js
+    // 3. Mã hóa mật khẩu thông qua helper utils/password.js
     const hashedPassword = await hashPassword(password);
 
-    // 4. Tạo thực thể User dựa trên Schema
-    const newUser = new User({
-      email,
+    // 4. Tạo và lưu thực thể User vào MongoDB
+    const newUser = await User.create({
+      email: email.toLowerCase(),
       password: hashedPassword,
       displayName,
     });
-
-    // 5. Lưu tài liệu (document) vào Firestore store
-    const docRef = await db.collection(COLLECTION_NAME).add(newUser.toFirestore());
-    newUser.id = docRef.id;
 
     return newUser;
   }
@@ -56,26 +44,18 @@ class UserService {
     }
 
     // 1. Tìm thông tin user dựa trên email
-    const snapshot = await db
-      .collection(COLLECTION_NAME)
-      .where("email", "==", email)
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
       throw new Error("Email hoặc mật khẩu không chính xác.");
     }
 
-    const doc = snapshot.docs[0];
-    const data = doc.data();
-
-    // 2. So khớp mật khẩu đã được mã hóa thông qua helper utils/hash.js
-    const isMatch = await comparePassword(password, data.password);
+    // 2. So khớp mật khẩu đã được mã hóa thông qua helper
+    const isMatch = await comparePassword(password, user.password);
     if (!isMatch) {
       throw new Error("Email hoặc mật khẩu không chính xác.");
     }
 
-    return new User({ id: doc.id, ...data });
+    return user;
   }
 
   /**
@@ -84,11 +64,11 @@ class UserService {
    * @returns {Promise<User>}
    */
   static async getUserById(userId) {
-    const doc = await db.collection(COLLECTION_NAME).doc(userId).get();
-    if (!doc.exists) {
+    const user = await User.findById(userId);
+    if (!user) {
       throw new Error("Không tìm thấy người dùng.");
     }
-    return new User({ id: doc.id, ...doc.data() });
+    return user;
   }
 
   /**
@@ -98,50 +78,40 @@ class UserService {
    * @returns {Promise<User>}
    */
   static async updateUser(userId, updateData) {
-    const userRef = db.collection(COLLECTION_NAME).doc(userId);
-    const doc = await userRef.get();
-
-    if (!doc.exists) {
+    const user = await User.findById(userId);
+    if (!user) {
       throw new Error("Người dùng không tồn tại.");
     }
 
-    const dataToUpdate = {};
     if (updateData.displayName !== undefined) {
-      dataToUpdate.displayName = updateData.displayName;
+      user.displayName = updateData.displayName;
     }
 
-    // Nếu có đổi mật khẩu, tiến hành mã hóa mật khẩu mới thông qua utils/hash.js
+    // Nếu có đổi mật khẩu, tiến hành mã hóa mật khẩu mới
     if (updateData.password) {
       if (updateData.password.length < 6) {
         throw new Error("Mật khẩu mới phải có ít nhất 6 ký tự.");
       }
-      dataToUpdate.password = await hashPassword(updateData.password);
+      user.password = await hashPassword(updateData.password);
     }
 
-    dataToUpdate.updatedAt = new Date().toISOString();
+    user.updatedAt = new Date();
 
-    // Cập nhật thông tin vào Firestore
-    await userRef.update(dataToUpdate);
-
-    // Lấy thông tin mới sau khi cập nhật
-    const updatedDoc = await userRef.get();
-    return new User({ id: userId, ...updatedDoc.data() });
+    // Lưu lại thay đổi vào MongoDB
+    await user.save();
+    return user;
   }
 
   /**
-   * Xóa người dùng khỏi Firestore.
+   * Xóa người dùng khỏi MongoDB.
    * @param {string} userId
    * @returns {Promise<boolean>}
    */
   static async deleteUser(userId) {
-    const userRef = db.collection(COLLECTION_NAME).doc(userId);
-    const doc = await userRef.get();
-
-    if (!doc.exists) {
+    const result = await User.findByIdAndDelete(userId);
+    if (!result) {
       throw new Error("Người dùng không tồn tại.");
     }
-
-    await userRef.delete();
     return true;
   }
 }

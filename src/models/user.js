@@ -1,58 +1,63 @@
+const mongoose = require("mongoose");
+
+const userSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: [true, "Email là bắt buộc."],
+      unique: true,
+      trim: true,
+      lowercase: true,
+      match: [/^\S+@\S+\.\S+$/, "Email không hợp lệ."],
+    },
+    password: {
+      type: String,
+      required: [true, "Mật khẩu là bắt buộc."],
+      minlength: [6, "Mật khẩu phải có ít nhất 6 ký tự."],
+    },
+    displayName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+  },
+  {
+    timestamps: true, // Tự động quản lý createdAt và updatedAt
+  }
+);
+
 /**
- * Lớp đại diện cho cấu trúc dữ liệu người dùng (User Schema).
- * Chỉ định nghĩa các trường thông tin, kiểm tra tính hợp lệ dữ liệu và định dạng đầu ra.
+ * Kiểm tra tính hợp lệ dữ liệu đầu vào (tương thích ngược với logic cũ).
+ * @param {Object} data - Dữ liệu đầu vào cần kiểm tra.
  */
-class User {
-  constructor({ id, email, password, displayName, createdAt, updatedAt }) {
-    this.id = id;
-    this.email = email;
-    this.password = password;
-    this.displayName = displayName || "";
-    this.createdAt = createdAt || new Date().toISOString();
-    this.updatedAt = updatedAt || new Date().toISOString();
+userSchema.statics.validate = function (data) {
+  if (!data.email) {
+    throw new Error("Email là bắt buộc.");
   }
+  if (data.email && !data.email.includes("@")) {
+    throw new Error("Email không hợp lệ.");
+  }
+  if (!data.password) {
+    throw new Error("Mật khẩu là bắt buộc.");
+  }
+  if (data.password && data.password.length < 6) {
+    throw new Error("Mật khẩu phải có ít nhất 6 ký tự.");
+  }
+};
 
-  /**
-   * Kiểm tra tính hợp lệ đơn giản cho Schema của User.
-   * @param {Object} data - Dữ liệu đầu vào cần kiểm tra.
-   */
-  static validate(data) {
-    if (!data.email) {
-      throw new Error("Email là bắt buộc.");
-    }
-    if (data.email && !data.email.includes("@")) {
-      throw new Error("Email không hợp lệ.");
-    }
-    if (!data.password) {
-      throw new Error("Mật khẩu là bắt buộc.");
-    }
-    if (data.password && data.password.length < 6) {
-      throw new Error("Mật khẩu phải có ít nhất 6 ký tự.");
-    }
-  }
+/**
+ * Định dạng dữ liệu phản hồi trả về client (loại bỏ mật khẩu và format id).
+ * @returns {Object}
+ */
+userSchema.methods.toResponse = function () {
+  const userObject = this.toObject();
+  userObject.id = userObject._id.toString();
+  delete userObject._id;
+  delete userObject.password;
+  delete userObject.__v;
+  return userObject;
+};
 
-  /**
-   * Chuyển đổi đối tượng User thành dữ liệu thuần túy để lưu trữ trong Firestore.
-   * @returns {Object}
-   */
-  toFirestore() {
-    return {
-      email: this.email,
-      password: this.password,
-      displayName: this.displayName,
-      createdAt: this.createdAt,
-      updatedAt: this.updatedAt,
-    };
-  }
-
-  /**
-   * Định dạng dữ liệu phản hồi trả về client (loại bỏ mật khẩu).
-   * @returns {Object}
-   */
-  toResponse() {
-    const { password, ...userWithoutPassword } = this;
-    return userWithoutPassword;
-  }
-}
+const User = mongoose.model("User", userSchema);
 
 module.exports = User;
