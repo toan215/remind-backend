@@ -30,8 +30,9 @@
 }
 ```
 
-### 1.2 List Posts within a Forum
-*   **Route:** `GET /api/forums/:forumId/posts`
+### 1.2 List Posts
+*   **Route:** `GET /api/forums/posts?forumId=...&limit=...&cursor=...`
+*   **Query Params:** `forumId` (optional, filter by forum), `limit` (default 10), `cursor` (optional, last item `_id` for pagination)
 *   **Response (200 OK):**
 ```json
 {
@@ -50,7 +51,9 @@
       "createdAt": "2026-06-14T10:30:00.000Z",
       "updatedAt": "2026-06-14T10:30:00.000Z"
     }
-  ]
+  ],
+  "nextCursor": "60d5fb...",
+  "hasNext": false
 }
 ```
 
@@ -88,23 +91,25 @@
 
 ### 1.4 Search Posts
 *   **Route:** `GET /api/forums/search?q=stress`
-*   **Response (200 OK):** *(Returns same format as 1.2 List Posts)*
+*   **Response (200 OK):** *(Returns same paginated format as 1.2 List Posts)*
 
 ---
 
 ## 🔵 2. User APIs (Auth Required: Bearer Token)
 
 ### 2.1 Create a Post
-*   **Route:** `POST /api/forums/:forumId/posts`
+*   **Route:** `POST /api/forums/posts`
 *   **Request JSON:**
 ```json
 {
   "title": "Need advice on sleep",
   "content": "I haven't been sleeping well lately.",
   "tags": ["sleep", "health"],
-  "authorDisplayMode": 1
+  "authorDisplayMode": 1,
+  "forumId": "60d5ec..."
 }
 ```
+*   `forumId` is optional. When omitted, the first active forum is used or a default "General Support" forum is auto-created.
 *   **Response (201 Created):**
 ```json
 {

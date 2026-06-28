@@ -9,14 +9,14 @@ This document outlines the API routes for the ReMind Forum features. For detaile
 
 ## 1. Public / Guest API (No Authentication Required)
 - `GET /api/forums` - List active main forum sections.
-- `GET /api/forums/:forumId/posts` - List active posts inside a specific forum.
+- `GET /api/forums/posts?forumId=...&limit=...&cursor=...` - List active posts with optional forumId filter and cursor pagination.
 - `GET /api/forums/posts/:postId` - Get post details and its active comments.
 - `GET /api/forums/search?q=...` - Full-text search across active posts.
 
 ---
 
 ## 2. User API (Authentication Required)
-- `POST /api/forums/:forumId/posts` - Create a new post.
+- `POST /api/forums/posts` - Create a new post (optional `forumId` in body; falls back to default forum).
 - `PATCH /api/forums/posts/:postId` - Edit own post.
 - `DELETE /api/forums/posts/:postId` - Delete own post.
 - `POST /api/forums/posts/:postId/comments` - Create a comment on a post.
