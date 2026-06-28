@@ -6,6 +6,7 @@
 - **Display Mode:** `authorDisplayMode` strictly uses numbers: `0` = Real Name, `1` = Anonymous.
 - **Separation of Concerns:** Moderation (Admin) APIs are separated from User APIs. This enforces strict security boundaries via `requireRole('admin')` middleware.
 - **Data Safety:** Public routes automatically hide private fields like `authorId` and only expose `publicAuthorName`. Deletions are "soft deletes" (changing `status` to `deleted` or `isActive` to `false`) to preserve moderation and audit history.
+- **Global Posts:** Post creation and retrieval are global. The backend automatically manages or defaults the associated forum under the hood.
 
 ---
 
@@ -13,6 +14,9 @@
 
 ### 1.1 List Active Forums
 *   **Route:** `GET /api/forums`
+*   **Query Parameters:**
+    *   `limit` (number, optional, default: 20)
+    *   `cursor` (string, optional) - cursor pagination ID.
 *   **Response (200 OK):**
 ```json
 {
@@ -26,13 +30,17 @@
       "createdAt": "2026-06-14T10:00:00.000Z",
       "updatedAt": "2026-06-14T10:00:00.000Z"
     }
-  ]
+  ],
+  "nextCursor": "60d5ec...",
+  "hasNext": false
 }
 ```
 
-### 1.2 List Posts
-*   **Route:** `GET /api/forums/posts?forumId=...&limit=...&cursor=...`
-*   **Query Params:** `forumId` (optional, filter by forum), `limit` (default 10), `cursor` (optional, last item `_id` for pagination)
+### 1.2 List Active Posts Globally
+*   **Route:** `GET /api/forums/posts`
+*   **Query Parameters:**
+    *   `limit` (number, optional, default: 10)
+    *   `cursor` (string, optional) - cursor pagination ID.
 *   **Response (200 OK):**
 ```json
 {
@@ -52,7 +60,7 @@
       "updatedAt": "2026-06-14T10:30:00.000Z"
     }
   ],
-  "nextCursor": "60d5fb...",
+  "nextCursor": "60d5fa...",
   "hasNext": false
 }
 ```
@@ -78,6 +86,7 @@
     {
       "_id": "60d5fb...",
       "postId": "60d5fa...",
+      "parentId": null,
       "content": "Take deep breaths. You can do this!",
       "publicAuthorName": "Dr. Sarah",
       "authorDisplayMode": 0,
@@ -91,7 +100,27 @@
 
 ### 1.4 Search Posts
 *   **Route:** `GET /api/forums/search?q=stress`
-*   **Response (200 OK):** *(Returns same paginated format as 1.2 List Posts)*
+*   **Response (200 OK):**
+```json
+{
+  "posts": [
+    {
+      "_id": "60d5fa...",
+      "forumId": "60d5ec...",
+      "title": "How to handle exam stress?",
+      "content": "I have finals coming up and I am panicking...",
+      "tags": ["stress", "exams"],
+      "publicAuthorName": "Anonymous",
+      "authorDisplayMode": 1,
+      "status": "active",
+      "likeCount": 5,
+      "commentCount": 2,
+      "createdAt": "2026-06-14T10:30:00.000Z",
+      "updatedAt": "2026-06-14T10:30:00.000Z"
+    }
+  ]
+}
+```
 
 ---
 
@@ -105,18 +134,15 @@
   "title": "Need advice on sleep",
   "content": "I haven't been sleeping well lately.",
   "tags": ["sleep", "health"],
-  "authorDisplayMode": 1,
-  "forumId": "60d5ec..."
+  "authorDisplayMode": 1
 }
 ```
-*   `forumId` is optional. When omitted, the first active forum is used or a default "General Support" forum is auto-created.
 *   **Response (201 Created):**
 ```json
 {
   "post": {
     "_id": "60d5fc...",
     "forumId": "60d5ec...",
-    "authorId": "user123...", 
     "title": "Need advice on sleep",
     "content": "I haven't been sleeping well lately.",
     "tags": ["sleep", "health"],
@@ -127,6 +153,7 @@
   }
 }
 ```
+*Note: The backend automatically maps the post to the first active forum or a default one if none are active.*
 
 ### 2.2 Edit Own Post
 *   **Route:** `PATCH /api/forums/posts/:postId`
@@ -172,16 +199,18 @@
 ```json
 {
   "content": "Try avoiding screens an hour before bed.",
-  "authorDisplayMode": 0
+  "authorDisplayMode": 0,
+  "parentId": "60d5fb..."
 }
 ```
+*Note: `parentId` is optional, used for nesting comment replies.*
 *   **Response (201 Created):**
 ```json
 {
   "comment": {
     "_id": "60d5fd...",
     "postId": "60d5fc...",
-    "authorId": "user123...",
+    "parentId": "60d5fb...",
     "content": "Try avoiding screens an hour before bed.",
     "publicAuthorName": "John Doe",
     "authorDisplayMode": 0,
@@ -221,6 +250,23 @@
   "comment": {
     "_id": "60d5fd...",
     "status": "deleted"
+  }
+}
+```
+
+### 2.7 Toggle Like
+*   **Route:** `POST /api/forums/posts/:postId/like`
+*   **Response (200 OK):**
+```json
+{
+  "message": "Toggle like successful",
+  "post": {
+    "_id": "60d5fc...",
+    "title": "Need advice on sleep",
+    "publicAuthorName": "Anonymous",
+    "authorDisplayMode": 1,
+    "likeCount": 1,
+    "likedBy": ["user123..."]
   }
 }
 ```
