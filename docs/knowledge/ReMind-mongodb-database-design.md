@@ -39,7 +39,7 @@ The design also expands the original features into these database-backed areas:
 - Student subscriptions, subscription plans, extra credit packages, wallets, and credit transaction ledger.
 - Payments, payment provider references, expert payouts, platform commission, and trial-abuse prevention.
 - Appointment booking, slot locking, cancellation, rescheduling, completion, no-show, and credit release/use logic.
-- AI chat, appointment chat, crisis support chat, group support chat, chat messages, and chat invitations.
+- Direct chat, group chat, forum group discussions, chat messages, and chat invitations.
 - Crisis/urgent support requests, self-reported risk, AI risk detection, emergency resources, and on-call experts.
 - Forums, forum posts, forum comments, anonymous public display, and moderation status.
 - Reports for users, experts, appointments, forum content, chat messages, and technical bugs.
@@ -380,15 +380,13 @@ Consultation booking.
 
 ### chatRooms
 
-Supports AI chat, appointment chat, crisis support, and group support.
+Supports direct and group chat rooms.
 
 ```javascript
 {
   _id: ObjectId,
-  type: String, // ai | appointment | crisis_support | group_support
-  appointmentId: ObjectId,
-  supportRequestId: ObjectId,
-  studentId: ObjectId,
+  type: String, // direct | group
+  appointmentId: ObjectId, // optional; used by direct rooms
   createdBy: ObjectId,
   participants: [
     {
@@ -398,14 +396,12 @@ Supports AI chat, appointment chat, crisis support, and group support.
       joinedAt: Date
     }
   ],
-  invitationPolicy: {
-    allowedInviterRoles: [String],
-    allowedInviteeRoles: [String]
-  },
   status: String, // active | closed | archived
-  latestRiskLevel: String, // none | low | medium | high | emergency
-  latestRiskFlags: [String],
-  lastRiskCheckedAt: Date,
+  lastMessage: { // optional
+    text: String,
+    senderId: ObjectId,
+    sentAt: Date
+  },
   createdAt: Date,
   updatedAt: Date
 }
@@ -420,19 +416,14 @@ Real-time chat messages. Backend writes only.
   _id: ObjectId,
   chatRoomId: ObjectId,
   senderId: ObjectId,
-  senderRole: String, // student | expert | admin | ai | manager
+  senderRole: String,
   messageType: String, // text | image | file | system
   text: String,
   fileId: ObjectId,
-  risk: {
-    level: String,
-    flags: [String],
-    checkedAt: Date
-  },
-  editedAt: Date,
-  deletedAt: Date,
+  status: String, // active | hidden | deleted
   readBy: [ObjectId],
-  createdAt: Date
+  createdAt: Date,
+  updatedAt: Date
 }
 ```
 
@@ -451,16 +442,16 @@ Chat invitation request.
   status: String, // pending | accepted | rejected | cancelled
   reason: String,
   createdAt: Date,
+  updatedAt: Date,
   respondedAt: Date
 }
 ```
 
 Invitation rules:
 
-- Appointment/crisis chats: expert/admin can invite expert/admin only.
-- Group support chats: expert/admin can invite students or experts.
+- Invitations are only used for `group` chat rooms.
+- Any active room member can invite a user who is not already an active participant.
 - Invited users must accept or reject.
-- AI chat has no invitations.
 
 ### supportRequests
 
@@ -591,7 +582,9 @@ Who joined which group discussions.
   userId: ObjectId,
   role: String, // member | moderator
   joinedAt: Date,
-  lastReadAt: Date
+  lastReadAt: Date,
+  createdAt: Date,
+  updatedAt: Date
 }
 ```
 
@@ -1151,8 +1144,11 @@ db.expertSlots.createIndex({ expertId: 1, startAt: 1 });
 db.expertSlots.createIndex({ status: 1, startAt: 1 });
 
 // Chat
-db.chatMessages.createIndex({ chatRoomId: 1, createdAt: 1 });
-db.chatRooms.createIndex({ studentId: 1, status: 1 });
+db.chatMessages.createIndex({ chatRoomId: 1, createdAt: -1 });
+db.chatRooms.createIndex({ 'participants.userId': 1, status: 1 });
+db.chatRooms.createIndex({ type: 1, appointmentId: 1 });
+db.chatInvitations.createIndex({ chatRoomId: 1, invitedUserId: 1 });
+db.chatInvitations.createIndex({ invitedUserId: 1, status: 1 });
 
 // Notifications
 db.notifications.createIndex({ userId: 1, status: 1, createdAt: -1 });

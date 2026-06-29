@@ -201,8 +201,8 @@ export const updatePost: RequestHandler = async (req, res) => {
         return res.status(400).json({ error: 'Invalid author display mode' });
       }
       post.authorDisplayMode = authorDisplayMode as AuthorDisplayMode;
-      // Recalculate public name
-      post.publicAuthorName = buildPublicAuthorName(req.user as any, post.authorDisplayMode as AuthorDisplayMode);
+      const dbUser = await User.findById(userId).select('fullName').lean();
+      post.publicAuthorName = buildPublicAuthorName(dbUser, post.authorDisplayMode as AuthorDisplayMode);
     }
 
     await post.save();
@@ -530,11 +530,12 @@ export const toggleLike: RequestHandler = async (req, res) => {
 
     const likedBy = (post.likedBy || []).map((id: any) => id.toString());
     const index = likedBy.indexOf(userId);
+    const wasLiked = index !== -1;
 
-    if (index === -1) {
-      likedBy.push(userId);
-    } else {
+    if (wasLiked) {
       likedBy.splice(index, 1);
+    } else {
+      likedBy.push(userId);
     }
 
     post.likedBy = likedBy;
@@ -543,6 +544,7 @@ export const toggleLike: RequestHandler = async (req, res) => {
 
     return res.status(200).json({
       message: 'Toggle like successful',
+      liked: !wasLiked,
       post: toSafeDocument(post.toObject())
     });
   } catch (err) {

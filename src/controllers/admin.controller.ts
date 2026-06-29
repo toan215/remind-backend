@@ -327,8 +327,8 @@ export const approveExpert: RequestHandler = async (req, res) => {
     if (expert.role !== 'expert') {
       return res.status(400).json({ error: 'Target user is not an expert' });
     }
-    if ((expert.status as string) === 'approved') {
-      return res.status(409).json({ error: 'Expert already approved' });
+    if ((expert.status as string) === 'active') {
+      return res.status(409).json({ error: 'Expert already active' });
     }
 
     const reviewedBy = adminId ? new mongoose.Types.ObjectId(adminId) : undefined;
