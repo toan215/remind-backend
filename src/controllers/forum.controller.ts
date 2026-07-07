@@ -454,3 +454,17 @@ export const searchPosts: RequestHandler = async (req, res) => {
     return res.status(500).json({ error: 'Failed to search forum posts' });
   }
 };
+
+export const listAllPosts: RequestHandler = async (req, res) => {
+  try {
+    const posts = await ForumPost.find({ status: 'active' })
+      .select('-authorId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({ posts });
+  } catch (err) {
+    console.error('listAllPosts error:', err);
+    return res.status(500).json({ error: 'Failed to fetch all forum posts' });
+  }
+};
