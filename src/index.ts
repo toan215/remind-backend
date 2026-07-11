@@ -9,6 +9,7 @@ import forumRoutes from './routes/forum.routes';
 import authRoutes from './routes/auth.routes';
 import chatRoutes from './routes/chat.routes';
 import aiRoutes from './routes/ai.routes';
+import notificationRoutes from './routes/notification.routes';
 import { createSocketServer } from './socket';
 
 const app = express();
@@ -34,6 +35,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/forums', forumRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   console.error(err);
