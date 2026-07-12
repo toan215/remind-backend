@@ -585,3 +585,45 @@ export const toggleLike: RequestHandler = async (req, res) => {
     return res.status(500).json({ error: 'Failed to toggle like' });
   }
 };
+
+export const toggleCommentLike: RequestHandler = async (req, res) => {
+  const { commentId } = req.params;
+  const userId = req.user?.id;
+
+  if (!isValidObjectId(commentId as string)) {
+    return res.status(400).json({ error: 'Invalid comment id' });
+  }
+  if (!isValidObjectId(userId)) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  try {
+    const comment = await ForumComment.findById(commentId);
+    if (!comment) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+
+    const likedBy = (comment.likedBy || []).map((id: any) => id.toString());
+    const index = likedBy.indexOf(userId);
+    const wasLiked = index !== -1;
+
+    if (wasLiked) {
+      likedBy.splice(index, 1);
+    } else {
+      likedBy.push(userId);
+    }
+
+    comment.likedBy = likedBy;
+    comment.likeCount = likedBy.length;
+    await comment.save();
+
+    return res.status(200).json({
+      message: 'Toggle like successful',
+      liked: !wasLiked,
+      comment: toSafeDocument(comment.toObject(), userId)
+    });
+  } catch (err) {
+    console.error('toggleCommentLike error:', err);
+    return res.status(500).json({ error: 'Failed to toggle comment like' });
+  }
+};

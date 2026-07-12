@@ -1,0 +1,91 @@
+{
+  "forums": [
+    {
+      "_id": { "$oid": "60d5ecb8b311c81f00b21a01" },
+      "title": "Chuyện Học Hành",
+      "description": "Góc chia sẻ kinh nghiệm học tập, thi cử và áp lực điểm số.",
+      "isActive": true,
+      "createdAt": { "$date": "2023-01-01T00:00:00.000Z" },
+      "updatedAt": { "$date": "2023-01-01T00:00:00.000Z" },
+      "__v": 0
+    },
+    {
+      "_id": { "$oid": "60d5ecb8b311c81f00b21a02" },
+      "title": "Góc Tâm Tình",
+      "description": "Nơi tâm sự chuyện tình cảm, gia đình và các mối quan hệ xã hội.",
+      "isActive": true,
+      "createdAt": { "$date": "2023-01-02T00:00:00.000Z" },
+      "updatedAt": { "$date": "2023-01-02T00:00:00.000Z" },
+      "__v": 0
+    }
+  ],
+  "forumPosts": [
+    {
+      "_id": { "$oid": "60d5ecb8b311c81f00b21b01" },
+      "forumId": { "$oid": "60d5ecb8b311c81f00b21a01" },
+      "authorId": { "$oid": "60d5ecb8b311c81f00b21c01" },
+      "authorDisplayMode": 1,
+      "publicAuthorName": "Anonymous",
+      "title": "Áp lực trước kỳ thi cuối kỳ quá lớn",
+      "content": "Chào mọi người, dạo gần đây mình cảm thấy rất áp lực và mất ngủ triền miên vì khối lượng bài vở quá nhiều. Không biết có ai giống mình và có cách nào để cải thiện tâm lý không ạ?",
+      "tags": ["áp lực", "thi cử", "mất ngủ"],
+      "status": "active",
+      "likeCount": 15,
+      "commentCount": 2,
+      "likedBy": [
+        { "$oid": "60d5ecb8b311c81f00b21c02" },
+        { "$oid": "60d5ecb8b311c81f00b21c03" }
+      ],
+      "createdAt": { "$date": "2023-05-15T08:30:00.000Z" },
+      "updatedAt": { "$date": "2023-05-15T08:30:00.000Z" },
+      "__v": 0
+    },
+    {
+      "_id": { "$oid": "60d5ecb8b311c81f00b21b02" },
+      "forumId": { "$oid": "60d5ecb8b311c81f00b21a02" },
+      "authorId": { "$oid": "60d5ecb8b311c81f00b21c02" },
+      "authorDisplayMode": 0,
+      "publicAuthorName": "Nguyễn Văn A",
+      "title": "Cách cân bằng giữa công việc làm thêm và học tập",
+      "content": "Mình vừa nhận một công việc part-time nhưng lại thấy không còn nhiều thời gian cho việc học. Mọi người có tip quản lý thời gian nào hiệu quả chia sẻ cho mình với.",
+      "tags": ["time management", "part-time", "cân bằng"],
+      "status": "active",
+      "likeCount": 8,
+      "commentCount": 0,
+      "likedBy": [],
+      "createdAt": { "$date": "2023-05-16T14:15:00.000Z" },
+      "updatedAt": { "$date": "2023-05-16T14:15:00.000Z" },
+      "__v": 0
+    }
+  ],
+  "forumComments": [
+    {
+      "_id": { "$oid": "60d5ecb8b311c81f00b21d01" },
+      "postId": { "$oid": "60d5ecb8b311c81f00b21b01" },
+      "authorId": { "$oid": "60d5ecb8b311c81f00b21c03" },
+      "authorDisplayMode": 0,
+      "publicAuthorName": "Trần Thị B",
+      "content": "Bạn hãy thử chia nhỏ thời gian học ra thành từng block 25 phút (phương pháp Pomodoro) xem sao nhé. Cố lên!",
+      "status": "active",
+      "likeCount": 5,
+      "parentId": null,
+      "createdAt": { "$date": "2023-05-15T09:00:00.000Z" },
+      "updatedAt": { "$date": "2023-05-15T09:00:00.000Z" },
+      "__v": 0
+    },
+    {
+      "_id": { "$oid": "60d5ecb8b311c81f00b21d02" },
+      "postId": { "$oid": "60d5ecb8b311c81f00b21b01" },
+      "authorId": { "$oid": "60d5ecb8b311c81f00b21c01" },
+      "authorDisplayMode": 1,
+      "publicAuthorName": "Anonymous",
+      "content": "Cảm ơn bạn nhiều, mình sẽ áp dụng thử phương pháp này.",
+      "status": "active",
+      "likeCount": 1,
+      "parentId": { "$oid": "60d5ecb8b311c81f00b21d01" },
+      "createdAt": { "$date": "2023-05-15T09:15:00.000Z" },
+      "updatedAt": { "$date": "2023-05-15T09:15:00.000Z" },
+      "__v": 0
+    }
+  ]
+}
