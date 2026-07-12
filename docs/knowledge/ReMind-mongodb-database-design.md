@@ -299,6 +299,19 @@ Prevents trial abuse across many accounts.
 
 Use hashed fingerprints only. Never store real card numbers or raw device identifiers.
 
+### otps
+
+Stores OTP (One-Time Password) codes used for password recovery/reset password flows.
+
+```javascript
+{
+  _id: ObjectId,
+  email: String, // index: email: 1
+  otp: String,
+  expiresAt: Date // TTL index: expiresAt: 1, expireAfterSeconds: 0
+}
+```
+
 ### expertAvailability
 
 Expert weekly schedule settings.
