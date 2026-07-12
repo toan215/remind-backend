@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import type { Express } from 'express';
 import authRoutes from '../routes/auth.routes';
 import User from '../models/user.model';
+import Otp from '../models/otp.model';
 
 const buildApp = (): Express => {
   const app = express();
@@ -269,6 +270,117 @@ describe('Auth API', () => {
         .send({ googleToken: 'bad-token' });
 
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('Forgot and Reset Password OTP flow', () => {
+    const testEmail = 'otptest@example.com';
+    const testPassword = 'Password123!';
+    const newPassword = 'NewPassword456!';
+
+    beforeEach(async () => {
+      await User.deleteMany({ email: testEmail });
+      await Otp.deleteMany({ email: testEmail });
+      
+      const hashedPassword = await createPasswordHash(testPassword);
+      await User.create({
+        email: testEmail,
+        password: hashedPassword,
+        fullName: 'OTP Test User',
+        role: 'student',
+        status: 'active',
+      });
+    });
+
+    describe('POST /api/auth/forgot-password', () => {
+      it('rejects forgot password if email is missing', async () => {
+        const res = await request(app)
+          .post('/api/auth/forgot-password')
+          .send({});
+        expect(res.status).toBe(400);
+      });
+
+      it('rejects forgot password if email does not exist', async () => {
+        const res = await request(app)
+          .post('/api/auth/forgot-password')
+          .send({ email: 'nonexistent@example.com' });
+        expect(res.status).toBe(404);
+      });
+
+      it('creates OTP and returns 200 on success', async () => {
+        const res = await request(app)
+          .post('/api/auth/forgot-password')
+          .send({ email: testEmail });
+        
+        expect(res.status).toBe(200);
+        expect(res.body.message).toBe('OTP sent successfully');
+
+        const otpRecord = await Otp.findOne({ email: testEmail });
+        expect(otpRecord).not.toBeNull();
+        expect(otpRecord?.otp).toHaveLength(6);
+      });
+    });
+
+    describe('POST /api/auth/reset-password', () => {
+      it('rejects if required fields are missing', async () => {
+        const res = await request(app)
+          .post('/api/auth/reset-password')
+          .send({ email: testEmail });
+        expect(res.status).toBe(400);
+      });
+
+      it('rejects if password is too short', async () => {
+        const res = await request(app)
+          .post('/api/auth/reset-password')
+          .send({ email: testEmail, otp: '123456', newPassword: '123' });
+        expect(res.status).toBe(400);
+      });
+
+      it('rejects if OTP does not exist or expired', async () => {
+        const res = await request(app)
+          .post('/api/auth/reset-password')
+          .send({ email: testEmail, otp: '111111', newPassword });
+        expect(res.status).toBe(400);
+      });
+
+      it('rejects if OTP is incorrect', async () => {
+        await Otp.create({
+          email: testEmail,
+          otp: '123456',
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        });
+
+        const res = await request(app)
+          .post('/api/auth/reset-password')
+          .send({ email: testEmail, otp: '654321', newPassword });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Invalid OTP code');
+      });
+
+      it('resets password successfully with correct OTP', async () => {
+        await Otp.create({
+          email: testEmail,
+          otp: '123456',
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        });
+
+        const res = await request(app)
+          .post('/api/auth/reset-password')
+          .send({ email: testEmail, otp: '123456', newPassword });
+        
+        expect(res.status).toBe(200);
+        expect(res.body.message).toBe('Password reset successfully');
+
+        // Verify OTP is deleted
+        const otpRecord = await Otp.findOne({ email: testEmail });
+        expect(otpRecord).toBeNull();
+
+        // Verify password is updated in DB (by trying to login with new password)
+        const loginRes = await request(app)
+          .post('/api/auth/login')
+          .send({ email: testEmail, password: newPassword });
+        expect(loginRes.status).toBe(200);
+      });
     });
   });
 });

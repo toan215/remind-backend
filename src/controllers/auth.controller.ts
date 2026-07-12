@@ -6,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import User from '../models/user.model';
 import type { AuthTokenPayload, UserRole, UserStatus } from '../types/common';
+import Otp from '../models/otp.model';
+import { sendMail } from '../utils/email.service';
 
 interface RegisterBody {
   email?: unknown;
@@ -22,6 +24,16 @@ interface LoginBody {
 
 interface RefreshBody {
   refreshToken?: unknown;
+}
+
+interface ForgotPasswordBody {
+  email?: unknown;
+}
+
+interface ResetPasswordBody {
+  email?: unknown;
+  otp?: unknown;
+  newPassword?: unknown;
 }
 
 const ACCESS_TOKEN_EXPIRES_IN = '15m';
@@ -344,5 +356,105 @@ export const logout: RequestHandler<{}, unknown, RefreshBody> = async (req, res)
   } catch (error) {
     console.error('Logout error:', error);
     return res.status(401).json({ error: 'Invalid refresh token' });
+  }
+};
+
+export const forgotPassword: RequestHandler<{}, unknown, ForgotPasswordBody> = async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // 1. Kiểm tra user tồn tại
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'Email does not exist' });
+    }
+
+    // 2. Tạo mã OTP gồm 6 chữ số ngẫu nhiên
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 phút
+
+    // 3. Lưu OTP vào DB (cập nhật nếu đã tồn tại bản ghi cùng email)
+    await Otp.findOneAndUpdate(
+      { email },
+      { otp, expiresAt },
+      { upsert: true, new: true }
+    );
+
+    // 4. Gửi email chứa OTP
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+        <h2 style="color: #4f46e5; text-align: center;">Yêu Cầu Đặt Lại Mật Khẩu</h2>
+        <p>Xin chào <strong>${user.fullName || 'Người dùng'}</strong>,</p>
+        <p>Chúng tôi nhận được yêu cầu khôi phục mật khẩu cho tài khoản ReMind AI của bạn. Vui lòng sử dụng mã OTP dưới đây để hoàn tất quá trình đặt lại mật khẩu:</p>
+        <div style="background-color: #f3f4f6; padding: 15px; border-radius: 6px; text-align: center; margin: 20px 0;">
+          <span style="font-size: 28px; font-weight: bold; letter-spacing: 5px; color: #1f2937;">${otp}</span>
+        </div>
+        <p style="color: #ef4444; font-size: 14px;">Lưu ý: Mã OTP này có giá trị trong vòng 10 phút. Không chia sẻ mã này với bất kỳ ai.</p>
+        <hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #9ca3af; text-align: center;">Đây là email tự động từ hệ thống ReMind AI. Vui lòng không trả lời email này.</p>
+      </div>
+    `;
+
+    await sendMail({
+      to: email,
+      subject: '[ReMind AI] Mã OTP xác nhận khôi phục mật khẩu',
+      html: htmlContent
+    });
+
+    return res.status(200).json({ message: 'OTP sent successfully' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return res.status(500).json({ error: 'Failed to process forgot password request' });
+  }
+};
+
+export const resetPassword: RequestHandler<{}, unknown, ResetPasswordBody> = async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const otp = isString(req.body.otp) ? req.body.otp.trim() : '';
+    const newPassword = isString(req.body.newPassword) ? req.body.newPassword : '';
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ error: 'Email, OTP and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    // 1. Kiểm tra OTP
+    const otpRecord = await Otp.findOne({ email });
+    if (!otpRecord) {
+      return res.status(400).json({ error: 'OTP has expired or is invalid' });
+    }
+
+    if (otpRecord.otp !== otp) {
+      return res.status(400).json({ error: 'Invalid OTP code' });
+    }
+
+    if (otpRecord.expiresAt < new Date()) {
+      await Otp.deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ error: 'OTP code has expired' });
+    }
+
+    // 2. Tìm user và cập nhật mật khẩu mới
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await User.updateOne({ _id: user._id }, { $set: { password: hashedPassword } });
+
+    // 3. Xóa OTP sau khi sử dụng thành công
+    await Otp.deleteOne({ _id: otpRecord._id });
+
+    return res.status(200).json({ message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({ error: 'Failed to reset password' });
   }
 };
