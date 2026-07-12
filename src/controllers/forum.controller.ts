@@ -420,6 +420,7 @@ export const listForumPosts: RequestHandler = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string) || 10;
     const cursor = req.query.cursor as string;
+    const page = req.query.page ? parseInt(req.query.page as string) : undefined;
     const forumId = req.query.forumId as string | undefined;
 
     const query: any = { status: 'active' };
@@ -431,6 +432,28 @@ export const listForumPosts: RequestHandler = async (req, res) => {
       query.forumId = new mongoose.Types.ObjectId(forumId);
     }
 
+    // Page-based Pagination Logic
+    if (page !== undefined && page > 0) {
+      const skip = (page - 1) * limit;
+      const totalItems = await ForumPost.countDocuments(query);
+      const posts = await ForumPost.find(query)
+        .select('-likedBy')
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      logDB.read('ForumPost', query, posts.length);
+
+      return res.status(200).json({
+        posts: posts.map(p => toSafeDocument(p, req.user?.id)),
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        currentPage: page
+      });
+    }
+
+    // Cursor-based Pagination Logic (Backward Compatibility)
     if (cursor && mongoose.Types.ObjectId.isValid(cursor)) {
       query._id = { $lt: new mongoose.Types.ObjectId(cursor) };
     }
