@@ -2,7 +2,9 @@ import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import type { Webhook } from '@payos/node';
 import { getPayOSClient } from '../utils/payos';
+import { createPaymentUrl, verifyVnpay } from '../utils/vnpay';
 import Payment from '../models/payment.model';
+import Appointment from '../models/appointment.model';
 import CreditPackage from '../models/creditPackage.model';
 import SubscriptionPlan from '../models/subscriptionPlan.model';
 import StudentCreditWallet from '../models/studentCreditWallet.model';
@@ -300,6 +302,114 @@ export const payOSWebhook: RequestHandler = async (req, res) => {
   } catch (err) {
     console.error('payOSWebhook error:', err);
     return res.status(200).json({ message: 'ignored' });
+  }
+};
+
+// --- Appointment payment (VNPAY demo) ---
+
+interface CreateAppointmentPaymentBody {
+  appointmentId?: unknown;
+}
+
+export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppointmentPaymentBody> = async (req, res) => {
+  try {
+    const appointmentId = isString(req.body.appointmentId) ? req.body.appointmentId : '';
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+    if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) {
+      return res.status(400).json({ error: 'Invalid appointmentId' });
+    }
+
+    const appt = await Appointment.findById(appointmentId);
+    if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+    if (appt.studentId.toString() !== userId) return res.status(403).json({ error: 'Forbidden' });
+    if (appt.status !== 'pending_payment') {
+      return res.status(409).json({ error: 'Appointment is not awaiting payment' });
+    }
+
+    const orderCode = generateOrderCode();
+    const expiresAt = new Date(Date.now() + PAYMENT_TIMEOUT_MS);
+
+    const payment = await Payment.create({
+      userId: new mongoose.Types.ObjectId(userId),
+      kind: 'appointment',
+      appointmentId: appt._id,
+      amount: appt.amount ?? 0,
+      orderCode,
+      expiresAt,
+      status: 'pending',
+      provider: 'vnpay',
+    });
+
+    const checkoutUrl = createPaymentUrl({
+      orderCode,
+      amount: appt.amount ?? 0,
+      returnUrl: process.env.VNPAY_RETURN_URL || '',
+      ipnUrl: process.env.VNPAY_IPN_URL || '',
+    });
+
+    await Payment.updateOne({ _id: payment._id }, { $set: { checkoutUrl } });
+
+    return res.status(201).json({
+      paymentId: payment._id,
+      orderCode,
+      amount: appt.amount,
+      checkoutUrl,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (err) {
+    console.error('createAppointmentPayment error:', err);
+    return res.status(500).json({ error: 'Failed to create appointment payment' });
+  }
+};
+
+export const vnpayIpn: RequestHandler = async (req, res) => {
+  try {
+    if (!verifyVnpay(req.query as Record<string, unknown>)) {
+      return res.status(200).json({ RspCode: '97', Message: 'Invalid signature' });
+    }
+
+    const orderCode = Number(req.query.vnp_TxnRef);
+    const payment = await Payment.findOne({ orderCode });
+    if (!payment) return res.status(200).json({ RspCode: '01', Message: 'NotFound' });
+    if (payment.status === 'succeeded') {
+      return res.status(200).json({ RspCode: '00', Message: 'Success' });
+    }
+
+    const responseCode = String(req.query.vnp_ResponseCode || '');
+    const txnStatus = String(req.query.vnp_TransactionStatus || '');
+    const success = responseCode === '00' && txnStatus === '00';
+
+    if (success) {
+      await Payment.updateOne({ _id: payment._id }, { $set: { status: 'succeeded', paidAt: new Date() } });
+      await Appointment.findOneAndUpdate(
+        { _id: payment.appointmentId, status: 'pending_payment' },
+        { $set: { status: 'booked', paymentId: payment._id } }
+      );
+      return res.status(200).json({ RspCode: '00', Message: 'Success' });
+    }
+
+    await Payment.updateOne({ _id: payment._id }, { $set: { status: 'failed' } });
+    return res.status(200).json({ RspCode: '00', Message: 'Success' });
+  } catch (err) {
+    console.error('vnpayIpn error:', err);
+    return res.status(200).json({ RspCode: '99', Message: 'Unknown error' });
+  }
+};
+
+export const vnpayReturn: RequestHandler = async (req, res) => {
+  try {
+    if (!verifyVnpay(req.query as Record<string, unknown>)) {
+      return res.status(400).json({ error: 'invalid' });
+    }
+    const responseCode = String(req.query.vnp_ResponseCode || '');
+    const txnStatus = String(req.query.vnp_TransactionStatus || '');
+    const success = responseCode === '00' && txnStatus === '00';
+    const base = process.env.VNPAY_RETURN_URL || 'http://localhost:4000/api/payments/vnpay/return';
+    return res.redirect(`${base}?status=${success ? 'success' : 'failed'}`);
+  } catch (err) {
+    console.error('vnpayReturn error:', err);
+    return res.status(500).json({ error: 'Internal error' });
   }
 };
 

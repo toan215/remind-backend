@@ -3,8 +3,9 @@ import mongoose, { Schema, type InferSchemaType } from 'mongoose';
 const paymentSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    kind: { type: String, enum: ['credit_package', 'subscription_plan'], required: true },
+    kind: { type: String, enum: ['credit_package', 'subscription_plan', 'appointment'], required: true },
     productId: { type: Schema.Types.ObjectId },
+    appointmentId: { type: Schema.Types.ObjectId, ref: 'Appointment' },
     productSnapshot: { type: Schema.Types.Mixed },
     amount: { type: Number, required: true },
     currency: { type: String, default: 'VND' },

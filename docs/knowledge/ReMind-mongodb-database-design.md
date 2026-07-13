@@ -272,7 +272,9 @@ Payment history only. Do not store card data.
   organizationId: ObjectId,
   subscriptionId: ObjectId,
   creditPackageId: ObjectId,
-  provider: String, // stripe | momo | vnpay | paypal | other
+  appointmentId: ObjectId, // ref: Appointment (set when kind === 'appointment')
+  kind: String, // credit_package | subscription_plan | appointment
+  provider: String, // stripe | momo | vnpay | paypal | other | payos
   providerPaymentId: String,
   amount: Number,
   currency: String,
@@ -281,6 +283,8 @@ Payment history only. Do not store card data.
   createdAt: Date
 }
 ```
+
+> Note: Appointment payments use `kind: 'appointment'`, `provider: 'vnpay'` (demo/sandbox only — no real money), and link back to the appointment via `appointmentId`. The PayOS provider continues to handle `credit_package` / `subscription_plan` kinds.
 
 ### trialClaims
 
@@ -333,18 +337,16 @@ Expert weekly schedule settings.
 
 ### expertSlots
 
-Concrete bookable slots generated from availability.
+Concrete bookable slots created by an expert to publish availability. A slot can only be booked once: `bookAppointment` atomically flips `available` → `booked`, and `cancelAppointment` reverts `booked` → `available`.
 
 ```javascript
 {
   _id: ObjectId,
-  expertId: ObjectId,
+  expertId: ObjectId, // ref: User (expert)
   startAt: Date,
   endAt: Date,
-  status: String, // available | locked | booked | cancelled | expired
-  appointmentId: ObjectId,
-  lockedByStudentId: ObjectId,
-  lockedUntil: Date,
+  price: Number, // VND per session
+  status: String, // available | booked | unavailable
   createdAt: Date,
   updatedAt: Date
 }
@@ -352,16 +354,18 @@ Concrete bookable slots generated from availability.
 
 ### appointments
 
-Consultation booking.
+Consultation booking. Booking flow: student selects an available slot → `POST /api/appointments/book` reserves the slot (`status: 'booked'` on the slot) and creates an appointment in `pending_payment` → student pays via VNPAY demo (`POST /api/payments/appointment`) → IPN marks the Payment `succeeded` and flips the appointment to `booked`. Cancellation (`POST /api/appointments/:id/cancel`) reverts the slot to `available`.
 
 ```javascript
 {
   _id: ObjectId,
   studentId: ObjectId,
   expertId: ObjectId,
-  slotId: ObjectId,
+  slotId: ObjectId, // ref: ExpertSlot
   subscriptionId: ObjectId,
-  status: String, // confirmed | in_progress | completed | cancelled | no_show | rescheduled
+  paymentId: ObjectId, // ref: Payment (set when paid via VNPAY demo)
+  amount: Number, // VND, copied from the slot price at booking time
+  status: String, // pending_payment | booked | confirmed | in_progress | completed | cancelled | no_show | rescheduled
   creditSource: String,
   creditType: String,
   creditStatus: String,
@@ -1131,18 +1135,16 @@ Expert weekly schedule settings.
 
 ### expertSlots
 
-Concrete bookable slots generated from availability.
+Concrete bookable slots generated from availability. Experts manage their own slots via `POST /api/experts/:id/slots`, `GET /api/experts/:id/slots` (own), `GET /api/experts/:id/availability` (public available only), and `DELETE /api/experts/slots/:slotId`.
 
 ```javascript
 {
   _id: ObjectId,
-  expertId: ObjectId,
+  expertId: ObjectId, // ref: User
   startAt: Date,
   endAt: Date,
-  status: String, // available | locked | booked | cancelled | expired
-  appointmentId: ObjectId,
-  lockedByStudentId: ObjectId,
-  lockedUntil: Date,
+  price: Number, // VND per session
+  status: String, // available | booked | unavailable
   createdAt: Date,
   updatedAt: Date
 }
@@ -1150,16 +1152,18 @@ Concrete bookable slots generated from availability.
 
 ### appointments
 
-Consultation booking.
+Consultation booking. Booking flow: student selects an available slot → `POST /api/appointments/book` reserves the slot (`status: 'booked'` on the slot) and creates an appointment in `pending_payment` → student pays via VNPAY demo (`POST /api/payments/appointment`) → IPN marks the Payment `succeeded` and flips the appointment to `booked`. Cancellation (`POST /api/appointments/:id/cancel`) reverts the slot to `available`.
 
 ```javascript
 {
   _id: ObjectId,
   studentId: ObjectId,
   expertId: ObjectId,
-  slotId: ObjectId,
+  slotId: ObjectId, // ref: ExpertSlot
   subscriptionId: ObjectId,
-  status: String, // confirmed | in_progress | completed | cancelled | no_show | rescheduled
+  paymentId: ObjectId, // ref: Payment (set after successful payment)
+  amount: Number, // VND, copied from the slot price at booking time
+  status: String, // confirmed | in_progress | completed | cancelled | no_show | rescheduled | pending_payment | booked
   creditSource: String, // subscription | purchased_package | volunteer_free | organization
   creditType: String, // expert_session | free_expert_session
   creditStatus: String, // locked | used | released

@@ -3,7 +3,38 @@ import mongoose from 'mongoose';
 // Giả định các model này đã được tạo và export từ thư mục models
 import User from '../models/user.model';
 import Appointment from '../models/appointment.model';
+import ExpertSlot from '../models/expertSlot.model';
 import type { FullExpertUserDoc } from '../types/user.types';
+
+export const listPublicExperts = async (req: Request, res: Response) => {
+  try {
+    const experts = await User.find({ role: 'expert', status: 'active' })
+      .select('fullName expert createdAt')
+      .lean();
+
+    const expertIds = experts.map((e) => e._id);
+    const priceAgg = await ExpertSlot.aggregate([
+      { $match: { expertId: { $in: expertIds }, status: 'available' } },
+      { $group: { _id: '$expertId', priceFrom: { $min: '$price' } } },
+    ]);
+    const priceMap = new Map(priceAgg.map((p) => [p._id.toString(), p.priceFrom]));
+
+    const result = experts.map((e) => ({
+      _id: e._id,
+      fullName: e.fullName,
+      title: e.expert?.profile?.professionalTitle,
+      specialties: e.expert?.profile?.specialties ?? [],
+      languages: e.expert?.profile?.languages ?? [],
+      bio: e.expert?.profile?.bio,
+      priceFrom: priceMap.get(e._id.toString()) ?? null,
+    }));
+
+    return res.status(200).json({ experts: result });
+  } catch (err) {
+    console.error('listPublicExperts error:', err);
+    return res.status(500).json({ error: 'Failed to fetch experts' });
+  }
+};
 
 /**
  * Lấy dữ liệu cho trang dashboard của chuyên gia.
@@ -154,5 +185,116 @@ export const updateExpertSettings = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Lỗi khi cập nhật cài đặt chuyên gia:', error);
     res.status(500).json({ message: 'Lỗi máy chủ nội bộ' });
+  }
+};
+
+// --- Expert slot management ---
+
+interface SlotInput {
+  startAt?: unknown;
+  endAt?: unknown;
+  price?: unknown;
+}
+
+const toDate = (v: unknown): Date | null => {
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (v instanceof Date) return v;
+  return null;
+};
+
+export const createExpertSlots = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(401).json({ message: 'Xác thực không hợp lệ.' });
+    }
+    const id = req.params.id as string;
+    if (id !== userId) return res.status(403).json({ error: 'Forbidden' });
+
+    const raw = req.body?.slots;
+    const list: SlotInput[] = Array.isArray(raw) ? raw : [req.body];
+    if (list.length === 0 || (list.length === 1 && !list[0])) {
+      return res.status(400).json({ error: 'No slots provided' });
+    }
+
+    const docs: Record<string, unknown>[] = [];
+    for (const s of list) {
+      const startAt = toDate(s.startAt);
+      const endAt = toDate(s.endAt);
+      const price = typeof s.price === 'number' ? s.price : Number(s.price);
+      if (!startAt || !endAt || isNaN(price) || price <= 0) {
+        return res.status(400).json({ error: 'Invalid slot data' });
+      }
+      docs.push({
+        expertId: new mongoose.Types.ObjectId(userId),
+        startAt,
+        endAt,
+        price,
+        status: 'available',
+      });
+    }
+
+    const created = await ExpertSlot.insertMany(docs);
+    return res.status(201).json({ slots: created });
+  } catch (error) {
+    console.error('Lỗi khi tạo slot chuyên gia:', error);
+    return res.status(500).json({ error: 'Failed to create slots' });
+  }
+};
+
+export const listOwnSlots = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+    const id = req.params.id as string;
+    if (id !== userId) return res.status(403).json({ error: 'Forbidden' });
+
+    const slots = await ExpertSlot.find({ expertId: new mongoose.Types.ObjectId(userId) })
+      .sort({ startAt: 1 })
+      .lean();
+    return res.status(200).json({ slots });
+  } catch (error) {
+    console.error('Lỗi khi lấy slot chuyên gia:', error);
+    return res.status(500).json({ error: 'Failed to fetch slots' });
+  }
+};
+
+export const listAvailableSlots = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const slots = await ExpertSlot.find({ expertId: new mongoose.Types.ObjectId(id), status: 'available' })
+      .sort({ startAt: 1 })
+      .lean();
+    return res.status(200).json({ slots });
+  } catch (error) {
+    console.error('Lỗi khi lấy slot khả dụng:', error);
+    return res.status(500).json({ error: 'Failed to fetch slots' });
+  }
+};
+
+export const deleteExpertSlot = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+    const slotId = req.params.slotId as string;
+    if (!mongoose.Types.ObjectId.isValid(slotId)) return res.status(400).json({ error: 'Invalid slotId' });
+
+    const slot = await ExpertSlot.findOne({
+      _id: new mongoose.Types.ObjectId(slotId),
+      expertId: new mongoose.Types.ObjectId(userId),
+    });
+    if (!slot) return res.status(404).json({ error: 'Slot not found' });
+    if (slot.status === 'booked') return res.status(409).json({ error: 'Cannot delete a booked slot' });
+
+    await ExpertSlot.deleteOne({ _id: slot._id });
+    return res.status(200).json({ message: 'Slot deleted' });
+  } catch (error) {
+    console.error('Lỗi khi xóa slot:', error);
+    return res.status(500).json({ error: 'Failed to delete slot' });
   }
 };

@@ -21,7 +21,9 @@ export interface IAppointment extends Document {
   expertId: mongoose.Types.ObjectId;
   slotId: mongoose.Types.ObjectId;
   subscriptionId?: mongoose.Types.ObjectId;
-  status: 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show' | 'rescheduled';
+  paymentId?: mongoose.Types.ObjectId;
+  amount?: number;
+  status: 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show' | 'rescheduled' | 'pending_payment' | 'booked';
   creditSource: string;
   creditType: string;
   creditStatus: string;
@@ -56,7 +58,14 @@ const AppointmentSchema = new Schema<IAppointment>(
     expertId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     slotId: { type: Schema.Types.ObjectId, ref: 'ExpertSlot', required: true, index: true },
     subscriptionId: { type: Schema.Types.ObjectId, ref: 'StudentSubscription' },
-    status: { type: String, enum: ['confirmed', 'in_progress', 'completed', 'cancelled', 'no_show', 'rescheduled'], required: true, index: true },
+    paymentId: { type: Schema.Types.ObjectId, ref: 'Payment' },
+    amount: { type: Number },
+    status: {
+      type: String,
+      enum: ['confirmed', 'in_progress', 'completed', 'cancelled', 'no_show', 'rescheduled', 'pending_payment', 'booked'],
+      required: true,
+      index: true,
+    },
     creditSource: { type: String },
     scheduledStartAt: { type: Date, required: true },
     scheduledEndAt: { type: Date, required: true },

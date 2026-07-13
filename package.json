@@ -8,6 +8,7 @@
     "build": "tsc",
     "seed": "ts-node scripts/seedForums.ts",
     "seed:admin": "ts-node scripts/seedAdmin.ts",
+    "seed:experts": "ts-node scripts/seedExperts.ts",
     "seed:payments": "ts-node scripts/seedPayments.ts",
     "seed:mock": "ts-node scripts/seedMock.ts",
     "test": "jest --runInBand"
