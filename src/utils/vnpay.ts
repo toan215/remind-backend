@@ -45,6 +45,7 @@ export const createPaymentUrl = (opts: {
   amount: number;
   returnUrl: string;
   ipnUrl: string;
+  ipAddr: string;
 }): string => {
   const now = new Date();
   const params: VnpayParams = {
@@ -59,6 +60,7 @@ export const createPaymentUrl = (opts: {
     vnp_Locale: 'vn',
     vnp_ReturnUrl: opts.returnUrl,
     vnp_IpnUrl: opts.ipnUrl,
+    vnp_IpAddr: opts.ipAddr,
     vnp_CreateDate: formatVnpDate(now),
     vnp_ExpireDate: formatVnpDate(new Date(now.getTime() + 15 * 60 * 1000)),
   };
@@ -90,5 +92,7 @@ export const verifyVnpay = (query: Record<string, unknown>): boolean => {
   const computed = computeVnpaySecureHash(query, VNPAY_HASH_SECRET);
   const provided = String(query['vnp_SecureHash'] || '').toLowerCase();
 
-  return computed === provided;
+  const a = Buffer.from(computed);
+  const b = Buffer.from(provided);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 };

@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import type { Webhook } from '@payos/node';
 import { getPayOSClient } from '../utils/payos';
-import { createPaymentUrl, verifyVnpay } from '../utils/vnpay';
+import { verifyVnpay } from '../utils/vnpay';
 import Payment from '../models/payment.model';
 import Appointment from '../models/appointment.model';
 import CreditPackage from '../models/creditPackage.model';
@@ -305,14 +305,14 @@ export const payOSWebhook: RequestHandler = async (req, res) => {
   }
 };
 
-// --- Appointment payment (VNPAY demo) ---
+// --- Appointment payment (DEMO - instant success, no VNPay) ---
 
 interface CreateAppointmentPaymentBody {
   appointmentId?: unknown;
 }
 
 export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppointmentPaymentBody> = async (req, res) => {
-  try {
+    try {
     const appointmentId = isString(req.body.appointmentId) ? req.body.appointmentId : '';
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Authentication required' });
@@ -328,7 +328,6 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
     }
 
     const orderCode = generateOrderCode();
-    const expiresAt = new Date(Date.now() + PAYMENT_TIMEOUT_MS);
 
     const payment = await Payment.create({
       userId: new mongoose.Types.ObjectId(userId),
@@ -336,26 +335,22 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
       appointmentId: appt._id,
       amount: appt.amount ?? 0,
       orderCode,
-      expiresAt,
-      status: 'pending',
-      provider: 'vnpay',
+      status: 'succeeded',
+      provider: 'demo',
+      paidAt: new Date(),
     });
 
-    const checkoutUrl = createPaymentUrl({
-      orderCode,
-      amount: appt.amount ?? 0,
-      returnUrl: process.env.VNPAY_RETURN_URL || '',
-      ipnUrl: process.env.VNPAY_IPN_URL || '',
-    });
-
-    await Payment.updateOne({ _id: payment._id }, { $set: { checkoutUrl } });
+    await Appointment.updateOne(
+      { _id: appt._id, status: 'pending_payment' },
+      { $set: { status: 'booked', paymentId: payment._id } }
+    );
 
     return res.status(201).json({
       paymentId: payment._id,
       orderCode,
       amount: appt.amount,
-      checkoutUrl,
-      expiresAt: expiresAt.toISOString(),
+      status: 'succeeded',
+      message: 'Demo payment succeeded instantly',
     });
   } catch (err) {
     console.error('createAppointmentPayment error:', err);

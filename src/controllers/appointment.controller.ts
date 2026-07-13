@@ -100,3 +100,74 @@ export const cancelAppointment: RequestHandler = async (req, res) => {
     return res.status(500).json({ error: 'Failed to cancel appointment' });
   }
 };
+
+export const startSession: RequestHandler = async (req, res) => {
+  try {
+    const id = req.params.id as string;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const appt = await Appointment.findById(id);
+    if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+    if (appt.expertId.toString() !== userId) {
+      return res.status(403).json({ error: 'Only the expert can start the session' });
+    }
+    if (appt.status !== 'booked' && appt.status !== 'confirmed') {
+      return res.status(409).json({ error: 'Appointment cannot be started' });
+    }
+
+    const now = new Date();
+    await Appointment.updateOne(
+      { _id: appt._id },
+      { 
+        $set: { 
+          status: 'in_progress',
+          expertJoinedAt: now,
+          actualStartAt: now,
+        } 
+      }
+    );
+
+    return res.status(200).json({ message: 'Session started' });
+  } catch (err) {
+    console.error('startSession error:', err);
+    return res.status(500).json({ error: 'Failed to start session' });
+  }
+};
+
+export const endSession: RequestHandler = async (req, res) => {
+  try {
+    const id = req.params.id as string;
+    const userId = req.user?.id;
+    const expertNote = isString(req.body.expertNote) ? req.body.expertNote : undefined;
+    
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const appt = await Appointment.findById(id);
+    if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+    if (appt.expertId.toString() !== userId) {
+      return res.status(403).json({ error: 'Only the expert can end the session' });
+    }
+    if (appt.status !== 'in_progress') {
+      return res.status(409).json({ error: 'Session is not in progress' });
+    }
+
+    const updateData: any = {
+      status: 'completed',
+      actualEndAt: new Date(),
+    };
+
+    if (expertNote) {
+      updateData.expertNote = expertNote;
+    }
+
+    await Appointment.updateOne({ _id: appt._id }, { $set: updateData });
+
+    return res.status(200).json({ message: 'Session completed' });
+  } catch (err) {
+    console.error('endSession error:', err);
+    return res.status(500).json({ error: 'Failed to end session' });
+  }
+};
