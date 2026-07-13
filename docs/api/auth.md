@@ -128,3 +128,54 @@ Invalidate the current refresh token.
   "message": "Logged out successfully"
 }
 ```
+
+## POST /api/auth/forgot-password
+
+Request an OTP (One-Time Password) to reset password. Send email containing OTP to user.
+
+### Request Body
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+### Response
+
+**200 OK**
+```json
+{
+  "message": "OTP sent successfully"
+}
+```
+
+**400 Bad Request** — Missing email
+**404 Not Found** — Email does not exist
+
+## POST /api/auth/reset-password
+
+Validate OTP and update user's password.
+
+### Request Body
+
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456",
+  "newPassword": "newsecurepassword"
+}
+```
+
+### Response
+
+**200 OK**
+```json
+{
+  "message": "Password reset successfully"
+}
+```
+
+**400 Bad Request** — Missing required fields, password less than 6 characters, invalid OTP, or expired OTP
+**404 Not Found** — User not found
+

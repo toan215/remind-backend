@@ -2,7 +2,6 @@ import { Server as SocketIOServer } from 'socket.io';
 import type { Server as HttpServer } from 'http';
 import { verifySocketToken } from '../middlewares/socketAuth.middleware';
 import { registerChatHandlers } from './handlers/chat.handler';
-import { registerForumGroupHandlers } from './handlers/forumGroup.handler';
 import type { ClientToServerEvents, ServerToClientEvents, SocketAuthData } from '../types/chat.types';
 
 export const createSocketServer = (httpServer: HttpServer): SocketIOServer<ClientToServerEvents, ServerToClientEvents, {}, SocketAuthData> => {
@@ -34,7 +33,6 @@ export const createSocketServer = (httpServer: HttpServer): SocketIOServer<Clien
     console.log(`[Socket] Connected: ${socket.data.userId} (${socket.data.role})`);
 
     registerChatHandlers(socket);
-    registerForumGroupHandlers(socket);
 
     socket.on('disconnect', () => {
       console.log(`[Socket] Disconnected: ${socket.data.userId}`);

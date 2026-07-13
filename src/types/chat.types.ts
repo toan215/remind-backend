@@ -17,9 +17,6 @@ export interface ServerToClientEvents {
   'chat:typing': (data: { roomId: string; userId: string; isTyping: boolean }) => void;
   'chat:read': (data: { roomId: string; userId: string; messageIds: string[] }) => void;
   'chat:error': (data: { code: string; message: string }) => void;
-  'group:message': (msg: any) => void;
-  'group:typing': (data: { groupId: string; userId: string; isTyping: boolean }) => void;
-  'group:error': (data: { code: string; message: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -28,10 +25,6 @@ export interface ClientToServerEvents {
   'chat:message': (data: { roomId: string; text: string; type?: ChatMessageType }) => void;
   'chat:typing': (data: { roomId: string; isTyping: boolean }) => void;
   'chat:read': (data: { roomId: string; messageIds: string[] }) => void;
-  'group:join': (data: { groupId: string }) => void;
-  'group:leave': (data: { groupId: string }) => void;
-  'group:message': (data: { groupId: string; content: string }) => void;
-  'group:typing': (data: { groupId: string; isTyping: boolean }) => void;
 }
 
 export interface SocketAuthData {

@@ -460,33 +460,6 @@ io.use(async (socket, next) => {
   }
 });
 
-// Join group room
-io.on('connection', (socket) => {
-  socket.on('joinGroup', async ({ groupId }) => {
-    // Verify user is member of group
-    const membership = await db.collection('forumGroupMembers').findOne({
-      groupId: ObjectId(groupId),
-      userId: ObjectId(socket.userId)
-    });
-    
-    if (membership) {
-      socket.join(`group:${groupId}`);
-    }
-  });
-  
-  socket.on('leaveGroup', ({ groupId }) => {
-    socket.leave(`group:${groupId}`);
-  });
-});
-
-// Watch MongoDB for new messages
-const changeStream = db.collection('forumGroupMessages').watch();
-changeStream.on('change', async (change) => {
-  if (change.operationType === 'insert') {
-    const message = change.fullDocument;
-    io.to(`group:${message.groupId}`).emit('newMessage', message);
-  }
-});
 ```
 
 **Client Reconnection Logic:**

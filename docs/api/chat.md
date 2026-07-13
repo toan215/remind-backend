@@ -37,10 +37,6 @@ This document outlines the API routes for the ReMind Chat features. For detailed
 | `chat:message` | `{ roomId, text, type? }` | Send a message |
 | `chat:typing` | `{ roomId, isTyping }` | Typing indicator |
 | `chat:read` | `{ roomId, messageIds[] }` | Mark messages as read |
-| `group:join` | `{ groupId }` | Join a forum group discussion |
-| `group:leave` | `{ groupId }` | Leave a forum group discussion |
-| `group:message` | `{ groupId, content }` | Send a group message |
-| `group:typing` | `{ groupId, isTyping }` | Group typing indicator |
 
 ### Server → Client
 | Event | Payload | Description |
@@ -49,6 +45,3 @@ This document outlines the API routes for the ReMind Chat features. For detailed
 | `chat:typing` | `{ roomId, userId, isTyping }` | Typing status |
 | `chat:read` | `{ roomId, userId, messageIds[] }` | Read receipts |
 | `chat:error` | `{ code, message }` | Error feedback |
-| `group:message` | `ForumGroupMessage` document | Broadcast group message |
-| `group:typing` | `{ groupId, userId, isTyping }` | Group typing status |
-| `group:error` | `{ code, message }` | Group error feedback |

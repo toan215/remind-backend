@@ -8,11 +8,13 @@
     "build": "tsc",
     "seed": "ts-node scripts/seedForums.ts",
     "seed:admin": "ts-node scripts/seedAdmin.ts",
+    "seed:payments": "ts-node scripts/seedPayments.ts",
     "seed:mock": "ts-node scripts/seedMock.ts",
     "test": "jest --runInBand"
   },
   "license": "ISC",
   "dependencies": {
+    "@payos/node": "^2.0.5",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

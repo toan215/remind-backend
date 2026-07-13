@@ -299,6 +299,19 @@ Prevents trial abuse across many accounts.
 
 Use hashed fingerprints only. Never store real card numbers or raw device identifiers.
 
+### otps
+
+Stores OTP (One-Time Password) codes used for password recovery/reset password flows.
+
+```javascript
+{
+  _id: ObjectId,
+  email: String, // index: email: 1
+  otp: String,
+  expiresAt: Date // TTL index: expiresAt: 1, expireAfterSeconds: 0
+}
+```
+
 ### expertAvailability
 
 Expert weekly schedule settings.
@@ -546,61 +559,6 @@ Community forum comment.
   content: String,
   status: String, // active | hidden | deleted | under_review
   likeCount: Number,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumGroups
-
-Group discussion rooms.
-
-```javascript
-{
-  _id: ObjectId,
-  forumId: ObjectId,
-  title: String,
-  description: String,
-  createdBy: ObjectId,
-  status: String, // active | closed | archived
-  isPublic: Boolean,
-  maxParticipants: Number,
-  participantCount: Number,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumGroupMembers
-
-Who joined which group discussions.
-
-```javascript
-{
-  _id: ObjectId,
-  groupId: ObjectId,
-  userId: ObjectId,
-  role: String, // member | moderator
-  joinedAt: Date,
-  lastReadAt: Date,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumGroupMessages
-
-Messages in group discussions. Real-time updates via Change Streams.
-
-```javascript
-{
-  _id: ObjectId,
-  groupId: ObjectId,
-  senderId: ObjectId,
-  senderRole: String,
-  senderDisplayName: String,
-  content: String,
-  status: String, // active | hidden | deleted
   createdAt: Date,
   updatedAt: Date
 }
@@ -1080,37 +1038,6 @@ All API endpoints must implement proper authorization middleware:
 - Accessing other users' private data
 - Modifying roles without admin authorization
 
-## Real-time Forum Group Discussions
-
-Use MongoDB Change Streams with Socket.io:
-
-```javascript
-// Backend: Watch for new messages
-const changeStream = db.collection('forumGroupMessages').watch();
-changeStream.on('change', async (change) => {
-  if (change.operationType === 'insert') {
-    const message = change.fullDocument;
-    // Emit to all connected clients in this group
-    io.to(`group:${message.groupId}`).emit('newMessage', message);
-  }
-});
-
-// Client: Join group room
-socket.emit('joinGroup', { groupId, authToken });
-
-// Backend: Validate auth before allowing join
-socket.on('joinGroup', async ({ groupId, authToken }) => {
-  const user = verifyToken(authToken);
-  const membership = await db.collection('forumGroupMembers').findOne({
-    groupId: ObjectId(groupId),
-    userId: user._id
-  });
-  if (membership) {
-    socket.join(`group:${groupId}`);
-  }
-});
-```
-
 ## MongoDB Indexes
 
 ### Essential Indexes
@@ -1129,10 +1056,6 @@ db.forumPosts.createIndex({ forumId: 1, status: 1, createdAt: -1 });
 db.forumPosts.createIndex({ authorId: 1 });
 db.forumPosts.createIndex({ tags: 1 });
 db.forumPosts.createIndex({ title: "text", content: "text" }); // Full-text search
-
-// Forum groups
-db.forumGroupMessages.createIndex({ groupId: 1, createdAt: 1 });
-db.forumGroupMembers.createIndex({ groupId: 1, userId: 1 }, { unique: true });
 
 // Appointments
 db.appointments.createIndex({ studentId: 1, status: 1 });
