@@ -59,7 +59,8 @@ Stores every login account.
   _id: ObjectId,
   email: String,
   fullName: String,
-  avatarUrl: String,
+  avatar: String,
+  isAnonymous: Boolean,
   phone: String,
   role: String, // student | expert | manager | admin | system_manager
   status: String, // active | pending | rejected | banned
@@ -75,7 +76,6 @@ Stores every login account.
 
   student: {
     anonymousDisplayName: String,
-    isAnonymousMode: Boolean,
     dateOfBirth: Date,
     gender: String,
     schoolName: String,
