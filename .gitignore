@@ -4,3 +4,4 @@ node_modules
 .env.example
 adminsdk.json
 dist
+seed_notifications.ts
