@@ -10,6 +10,7 @@ import {
   listAvailableSlots,
   deleteExpertSlot,
   listPublicExperts,
+  getExpertProfile,
   uploadCredential,
   listCredentials,
 } from '../controllers/expert.controller';
@@ -20,6 +21,7 @@ const router = Router();
 
 // Public endpoints (no auth)
 router.get('/', listPublicExperts);
+router.get('/:id', getExpertProfile);
 router.get('/:id/availability', listAvailableSlots);
 
 // Tất cả các route phía dưới yêu cầu đăng nhập và có vai trò 'expert'

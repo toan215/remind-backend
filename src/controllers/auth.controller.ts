@@ -9,6 +9,7 @@ import Notification from '../models/notification.model';
 import type { AuthTokenPayload, UserRole, UserStatus } from '../types/common';
 import Otp from '../models/otp.model';
 import { sendMail } from '../utils/email.service';
+import { uploadToCloudinary } from '../services/cloudinary.service';
 
 interface RegisterBody {
   email?: unknown;
@@ -318,6 +319,19 @@ const getGoogleUserInfo = async (accessToken: string): Promise<GoogleUserInfo> =
   return data;
 };
 
+const uploadGoogleAvatarToCloudinary = async (pictureUrl: string): Promise<string> => {
+  try {
+    const response = await fetch(pictureUrl);
+    if (!response.ok) return '';
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return await uploadToCloudinary(buffer, 'avatars');
+  } catch (error) {
+    console.error('Failed to upload Google avatar to Cloudinary:', error);
+    return pictureUrl; // fallback to original google url
+  }
+};
+
 export const googleLogin: RequestHandler<{}, unknown, GoogleLoginBody> = async (req, res) => {
   try {
     const googleToken = isString(req.body.googleToken) ? req.body.googleToken : '';
@@ -340,20 +354,28 @@ export const googleLogin: RequestHandler<{}, unknown, GoogleLoginBody> = async (
       if (!user.googleId) {
         updateData.googleId = googleId;
       }
-      if (!user.avatar && info.picture) {
-        updateData.avatar = info.picture;
+      const hasGoogleAvatar = user.avatar && user.avatar.includes('googleusercontent.com');
+      if ((!user.avatar || hasGoogleAvatar) && info.picture) {
+        const cloudinaryUrl = await uploadGoogleAvatarToCloudinary(info.picture);
+        if (cloudinaryUrl) {
+          updateData.avatar = cloudinaryUrl;
+        }
       }
       if (Object.keys(updateData).length > 0) {
         user = await User.findByIdAndUpdate(user._id, { $set: updateData }, { new: true }) as typeof user;
       }
     } else {
+      let cloudinaryUrl = '';
+      if (info.picture) {
+        cloudinaryUrl = await uploadGoogleAvatarToCloudinary(info.picture);
+      }
       user = await User.create({
         email,
         fullName,
         googleId,
         role: 'student',
         status: 'active',
-        avatar: info.picture || '',
+        avatar: cloudinaryUrl,
       });
     }
 
@@ -379,18 +401,19 @@ export const logout: RequestHandler<{}, unknown, RefreshBody> = async (req, res)
       return res.status(400).json({ error: 'Refresh token is required' });
     }
 
-    const user = await getUserByRefreshToken(refreshToken);
-
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid refresh token' });
+    try {
+      const user = await getUserByRefreshToken(refreshToken);
+      if (user) {
+        await User.updateOne({ _id: user._id }, { $unset: { refreshToken: '' } });
+      }
+    } catch (err) {
+      console.log('Logout token validation skipped/failed:', err);
     }
-
-    await User.updateOne({ _id: user._id }, { $unset: { refreshToken: '' } });
 
     return res.status(200).json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
-    return res.status(401).json({ error: 'Invalid refresh token' });
+    return res.status(200).json({ message: 'Logged out successfully' });
   }
 };
 
