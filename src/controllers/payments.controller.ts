@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import type { Webhook } from '@payos/node';
 import { getPayOSClient, isPayOSDemo } from '../utils/payos';
-import { verifyVnpay } from '../utils/vnpay';
+import { verifyVnpay, createPaymentUrl } from '../utils/vnpay';
 import Payment, { type PaymentDoc } from '../models/payment.model';
 import Appointment from '../models/appointment.model';
 import CreditPackage from '../models/creditPackage.model';
@@ -410,6 +410,8 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
       });
     }
 
+    const expiresAt = new Date(Date.now() + PAYMENT_TIMEOUT_MS);
+
     const payment = await Payment.create({
       userId: new mongoose.Types.ObjectId(userId),
       kind: 'appointment',
@@ -436,8 +438,9 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
       paymentId: payment._id,
       orderCode,
       amount,
-      status: 'succeeded',
-      message: 'Demo payment succeeded instantly',
+      status: 'pending',
+      checkoutUrl,
+      message: 'VNPAY checkout URL generated',
     });
   } catch (err) {
     console.error('createAppointmentPayment error:', err);
