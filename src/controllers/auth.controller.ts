@@ -141,6 +141,7 @@ const isDuplicateEmailError = (error: unknown): boolean => {
 
 export const register: RequestHandler<{}, unknown, RegisterBody> = async (req, res) => {
   try {
+    console.log('[REGISTER] incoming request body:', JSON.stringify(req.body));
     const email = normalizeEmail(req.body.email);
     const password = isString(req.body.password) ? req.body.password : '';
     const fullName = normalizeName(req.body.fullName);
