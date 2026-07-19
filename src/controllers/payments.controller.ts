@@ -349,7 +349,7 @@ interface CreateAppointmentPaymentBody {
 }
 
 export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppointmentPaymentBody> = async (req, res) => {
-    try {
+  try {
     const appointmentId = isString(req.body.appointmentId) ? req.body.appointmentId : '';
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Authentication required' });
@@ -416,17 +416,21 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
       appointmentId: appt._id,
       amount,
       orderCode,
-      status: 'succeeded',
-      provider: 'demo',
-      paidAt: new Date(),
+      status: 'pending',
+      provider: 'vnpay',
+      expiresAt,
     });
 
-    await Appointment.updateOne(
-      { _id: appt._id, status: 'pending_payment' },
-      { $set: { status: 'booked', paymentId: payment._id } }
-    );
+    const returnUrl = process.env.VNPAY_RETURN_URL || 'http://localhost:4000/api/payments/vnpay/return';
+    const ipnUrl = process.env.VNPAY_IPN_URL || 'http://localhost:4000/api/payments/vnpay/ipn';
 
-    await ensureAppointmentChatRoom(appt._id, appt.studentId, appt.expertId, req.app.get('io'));
+    const checkoutUrl = createPaymentUrl({
+      orderCode,
+      amount: appt.amount ?? 0,
+      returnUrl,
+      ipnUrl,
+      ipAddr: (req.ip || '127.0.0.1').replace('::ffff:', ''),
+    });
 
     return res.status(201).json({
       paymentId: payment._id,

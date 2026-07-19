@@ -319,6 +319,50 @@ export const listAvailableSlots = async (req: Request, res: Response) => {
   }
 };
 
+export const getExpertProfile = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid expert ID' });
+    }
+
+    const expert = await User.findOne({ _id: id, role: 'expert', status: 'active' })
+      .select('fullName avatar expert createdAt')
+      .lean();
+
+    if (!expert) {
+      return res.status(404).json({ error: 'Expert not found' });
+    }
+
+    const expertIds = [expert._id];
+    const priceAgg = await ExpertSlot.aggregate([
+      { $match: { expertId: { $in: expertIds }, status: 'available' } },
+      { $group: { _id: '$expertId', priceFrom: { $min: '$price' } } },
+    ]);
+    const priceMap = new Map(priceAgg.map((p) => [p._id.toString(), p.priceFrom]));
+
+    const result = {
+      _id: expert._id,
+      fullName: expert.fullName,
+      avatar: expert.avatar,
+      title: expert.expert?.profile?.professionalTitle,
+      specialties: expert.expert?.profile?.specialties ?? [],
+      languages: expert.expert?.profile?.languages ?? [],
+      bio: expert.expert?.profile?.bio,
+      yearsOfExperience: expert.expert?.profile?.yearsOfExperience,
+      priceFrom: priceMap.get(expert._id.toString()) ?? null,
+      rating: expert.expert?.performanceStats?.averageRating || 0,
+      reviewCount: expert.expert?.performanceStats?.reviewCount || 0,
+      createdAt: expert.createdAt,
+    };
+
+    return res.status(200).json({ expert: result });
+  } catch (err) {
+    console.error('getExpertProfile error:', err);
+    return res.status(500).json({ error: 'Failed to fetch expert profile' });
+  }
+};
+
 export const deleteExpertSlot = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;

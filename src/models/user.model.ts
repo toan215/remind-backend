@@ -7,6 +7,7 @@ const expertSchema = new Schema(
       bio: { type: String },
       specialties: { type: [String] },
       languages: { type: [String] },
+      yearsOfExperience: { type: Number, default: 0 },
     },
     license: {
       licenseNumber: { type: String },
@@ -25,6 +26,11 @@ const expertSchema = new Schema(
       reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
       reviewedAt: { type: Date },
       rejectionReason: { type: String },
+    },
+    performanceStats: {
+      completedSessionCount: { type: Number, default: 0 },
+      averageRating: { type: Number, default: 0 },
+      reviewCount: { type: Number, default: 0 },
     },
   },
   { _id: false }
