@@ -1,9 +1,9 @@
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import type { Webhook } from '@payos/node';
-import { getPayOSClient } from '../utils/payos';
+import { getPayOSClient, isPayOSDemo } from '../utils/payos';
 import { verifyVnpay } from '../utils/vnpay';
-import Payment from '../models/payment.model';
+import Payment, { type PaymentDoc } from '../models/payment.model';
 import Appointment from '../models/appointment.model';
 import CreditPackage from '../models/creditPackage.model';
 import SubscriptionPlan from '../models/subscriptionPlan.model';
@@ -105,6 +105,40 @@ export const createPayment: RequestHandler<{}, unknown, CreatePaymentBody> = asy
       status: 'pending',
     });
 
+    const pid = payment._id;
+
+    if (isPayOSDemo()) {
+      // ponytail: demo mode — no real PayOS call, no real money. confirm instantly.
+      await Payment.updateOne(
+        { _id: pid },
+        {
+          $set: {
+            status: 'succeeded',
+            paidAt: new Date(),
+            provider: 'payos_demo',
+            checkoutUrl: null,
+            qrCode: null,
+          },
+        }
+      );
+
+      // apply benefits the same way the webhook would
+      await applyPaymentBenefits(payment);
+
+      const updated = await Payment.findById(pid).lean();
+      return res.status(201).json({
+        paymentId: pid,
+        orderCode,
+        amount,
+        status: 'succeeded',
+        demo: true,
+        checkoutUrl: null,
+        qrCode: null,
+        expiresAt: expiresAt.toISOString(),
+        payment: updated,
+      });
+    }
+
     const payOS = getPayOSClient();
     const returnUrl = process.env.PAYMENT_RETURN_URL || 'https://example.com/success';
     const cancelUrl = process.env.PAYMENT_CANCEL_URL || 'https://example.com/cancel';
@@ -118,7 +152,6 @@ export const createPayment: RequestHandler<{}, unknown, CreatePaymentBody> = asy
       expiredAt: Math.floor(expiresAt.getTime() / 1000),
     });
 
-    const pid = payment._id;
     await Payment.updateOne(
       { _id: pid },
       {
@@ -200,6 +233,88 @@ export const getMyWallet: RequestHandler = async (req, res) => {
 
 // --- Webhook ---
 
+const applyPaymentBenefits = async (payment: PaymentDoc): Promise<void> => {
+  if (payment.kind === 'credit_package') {
+    const snapshot = payment.productSnapshot as Record<string, unknown> | undefined;
+    const qty = (snapshot?.quantity as number) || 0;
+    if (snapshot?.type === 'ai_chat_messages') {
+      await StudentCreditWallet.updateOne(
+        { studentId: payment.userId },
+        { $inc: { aiChatMessageCredits: qty } },
+        { upsert: true }
+      );
+    } else {
+      await StudentCreditWallet.updateOne(
+        { studentId: payment.userId },
+        { $inc: { expertSessionCredits: qty } },
+        { upsert: true }
+      );
+    }
+
+    await CreditTransaction.create({
+      studentId: payment.userId,
+      type: snapshot?.type === 'ai_chat_messages' ? 'ai_chat_message' : 'expert_session',
+      direction: 'add',
+      quantity: qty,
+      source: 'purchase',
+      paymentId: payment._id,
+    });
+  } else if (payment.kind === 'subscription_plan') {
+    const snapshot = payment.productSnapshot as Record<string, unknown> | undefined;
+    const now = new Date();
+    const periodEnd = new Date(now);
+
+    if (snapshot?.billingPeriod === 'yearly') {
+      periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    } else {
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    }
+
+    const includedSessions = (snapshot?.includedExpertSessions as number) || 0;
+    const includedAi = (snapshot?.aiChatLimitPerMonth as number) || 0;
+
+    const existingSub = await StudentSubscription.findOne({ studentId: payment.userId });
+    if (existingSub && existingSub.status === 'active' && existingSub.currentPeriodEndAt) {
+      if (snapshot?.billingPeriod === 'yearly') {
+        existingSub.currentPeriodEndAt.setFullYear(existingSub.currentPeriodEndAt.getFullYear() + 1);
+      } else {
+        existingSub.currentPeriodEndAt.setMonth(existingSub.currentPeriodEndAt.getMonth() + 1);
+      }
+      existingSub.currentPeriodStartAt = existingSub.currentPeriodStartAt || now;
+      existingSub.remainingExpertSessions += includedSessions;
+      existingSub.remainingAiChatMessages += includedAi;
+      existingSub.planId = payment.productId;
+      await existingSub.save();
+    } else {
+      await StudentSubscription.findOneAndUpdate(
+        { studentId: payment.userId },
+        {
+          $set: {
+            studentId: payment.userId,
+            planId: payment.productId,
+            status: 'active' as const,
+            currentPeriodStartAt: now,
+            currentPeriodEndAt: periodEnd,
+            remainingExpertSessions: includedSessions,
+            lockedExpertSessions: 0,
+            remainingAiChatMessages: includedAi,
+          },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+    }
+
+    await CreditTransaction.create({
+      studentId: payment.userId,
+      type: 'expert_session',
+      direction: 'add',
+      quantity: includedSessions,
+      source: 'subscription',
+      paymentId: payment._id,
+    });
+  }
+};
+
 export const payOSWebhook: RequestHandler = async (req, res) => {
   try {
     const payOS = getPayOSClient();
@@ -218,86 +333,7 @@ export const payOSWebhook: RequestHandler = async (req, res) => {
       return res.status(200).json({ message: 'OK' });
     }
 
-    // Apply benefits
-    if (payment.kind === 'credit_package') {
-      const snapshot = payment.productSnapshot as Record<string, unknown> | undefined;
-      const qty = (snapshot?.quantity as number) || 0;
-      if (snapshot?.type === 'ai_chat_messages') {
-        await StudentCreditWallet.updateOne(
-          { studentId: payment.userId },
-          { $inc: { aiChatMessageCredits: qty } },
-          { upsert: true }
-        );
-      } else {
-        await StudentCreditWallet.updateOne(
-          { studentId: payment.userId },
-          { $inc: { expertSessionCredits: qty } },
-          { upsert: true }
-        );
-      }
-
-      await CreditTransaction.create({
-        studentId: payment.userId,
-        type: snapshot?.type === 'ai_chat_messages' ? 'ai_chat_message' : 'expert_session',
-        direction: 'add',
-        quantity: qty,
-        source: 'purchase',
-        paymentId: payment._id,
-      });
-    } else if (payment.kind === 'subscription_plan') {
-      const snapshot = payment.productSnapshot as Record<string, unknown> | undefined;
-      const now = new Date();
-      const periodEnd = new Date(now);
-
-      if (snapshot?.billingPeriod === 'yearly') {
-        periodEnd.setFullYear(periodEnd.getFullYear() + 1);
-      } else {
-        periodEnd.setMonth(periodEnd.getMonth() + 1);
-      }
-
-      const includedSessions = (snapshot?.includedExpertSessions as number) || 0;
-      const includedAi = (snapshot?.aiChatLimitPerMonth as number) || 0;
-
-      const existingSub = await StudentSubscription.findOne({ studentId: payment.userId });
-      if (existingSub && existingSub.status === 'active' && existingSub.currentPeriodEndAt) {
-        if (snapshot?.billingPeriod === 'yearly') {
-          existingSub.currentPeriodEndAt.setFullYear(existingSub.currentPeriodEndAt.getFullYear() + 1);
-        } else {
-          existingSub.currentPeriodEndAt.setMonth(existingSub.currentPeriodEndAt.getMonth() + 1);
-        }
-        existingSub.currentPeriodStartAt = existingSub.currentPeriodStartAt || now;
-        existingSub.remainingExpertSessions += includedSessions;
-        existingSub.remainingAiChatMessages += includedAi;
-        existingSub.planId = payment.productId;
-        await existingSub.save();
-      } else {
-        await StudentSubscription.findOneAndUpdate(
-          { studentId: payment.userId },
-          {
-            $set: {
-              studentId: payment.userId,
-              planId: payment.productId,
-              status: 'active' as const,
-              currentPeriodStartAt: now,
-              currentPeriodEndAt: periodEnd,
-              remainingExpertSessions: includedSessions,
-              lockedExpertSessions: 0,
-              remainingAiChatMessages: includedAi,
-            },
-          },
-          { upsert: true, returnDocument: 'after' }
-        );
-      }
-
-      await CreditTransaction.create({
-        studentId: payment.userId,
-        type: 'expert_session',
-        direction: 'add',
-        quantity: includedSessions,
-        source: 'subscription',
-        paymentId: payment._id,
-      });
-    }
+    await applyPaymentBenefits(payment);
 
     return res.status(200).json({ message: 'OK' });
   } catch (err) {
@@ -329,12 +365,56 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
     }
 
     const orderCode = generateOrderCode();
+    const amount = appt.amount ?? 0;
+
+    if (isPayOSDemo()) {
+      // ponytail: demo = real PayOS QR generated, but no webhook confirm; client auto-succeeds
+      const payOS = getPayOSClient();
+      const returnUrl = process.env.PAYMENT_RETURN_URL || 'https://example.com/success';
+      const cancelUrl = process.env.PAYMENT_CANCEL_URL || 'https://example.com/cancel';
+      const payOSRes = await payOS.paymentRequests.create({
+        orderCode,
+        amount,
+        description: 'ReMind booking',
+        returnUrl,
+        cancelUrl,
+      });
+
+      const payment = await Payment.create({
+        userId: new mongoose.Types.ObjectId(userId),
+        kind: 'appointment',
+        appointmentId: appt._id,
+        amount,
+        orderCode,
+        status: 'pending',
+        provider: 'payos_demo',
+        providerPaymentLinkId: payOSRes.paymentLinkId,
+        checkoutUrl: payOSRes.checkoutUrl,
+        qrCode: payOSRes.qrCode,
+      });
+
+      // ponytail: demo books immediately so chat opens on confirm; webhook guard stays idempotent
+      await Appointment.updateOne(
+        { _id: appt._id, status: 'pending_payment' },
+        { $set: { status: 'booked', paymentId: payment._id } }
+      );
+      await ensureAppointmentChatRoom(appt._id, appt.studentId, appt.expertId, req.app.get('io'));
+
+      return res.status(201).json({
+        paymentId: payment._id,
+        orderCode,
+        amount,
+        status: 'pending',
+        demoQr: { orderCode, amount, qrCode: payOSRes.qrCode, checkoutUrl: payOSRes.checkoutUrl, note: 'DEMO — không chuyển tiền thật' },
+        message: 'Demo QR generated',
+      });
+    }
 
     const payment = await Payment.create({
       userId: new mongoose.Types.ObjectId(userId),
       kind: 'appointment',
       appointmentId: appt._id,
-      amount: appt.amount ?? 0,
+      amount,
       orderCode,
       status: 'succeeded',
       provider: 'demo',
@@ -351,7 +431,7 @@ export const createAppointmentPayment: RequestHandler<{}, unknown, CreateAppoint
     return res.status(201).json({
       paymentId: payment._id,
       orderCode,
-      amount: appt.amount,
+      amount,
       status: 'succeeded',
       message: 'Demo payment succeeded instantly',
     });

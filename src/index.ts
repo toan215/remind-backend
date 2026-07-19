@@ -25,6 +25,11 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log(`[REQ] ${req.method} ${req.originalUrl} body=${JSON.stringify(req.body)}`);
+  next();
+});
+
 void connectDB();
 
 const io = createSocketServer(server);
