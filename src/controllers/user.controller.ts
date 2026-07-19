@@ -1,6 +1,8 @@
 import type { RequestHandler } from 'express';
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import User from '../models/user.model';
+import Report from '../models/report.model';
 import { uploadToCloudinary } from '../services/cloudinary.service';
 
 // Helper build safe user response
@@ -143,6 +145,54 @@ export const uploadAvatar: RequestHandler = async (req, res) => {
     });
   } catch (error) {
     console.error('Tải lên ảnh đại diện thất bại:', error);
+    return res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
+  }
+};
+
+/**
+ * Gửi báo cáo (report) đối tượng (expert, post, comment, v.v.)
+ */
+export const createReport: RequestHandler = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Chưa xác thực' });
+    }
+
+    const { targetType, targetId, reason, description } = req.body;
+
+    if (!targetType || !targetId || !reason) {
+      return res.status(400).json({ error: 'Thiếu thông tin báo cáo bắt buộc' });
+    }
+
+    if (!['user', 'expert', 'post', 'comment', 'message', 'bug'].includes(targetType)) {
+      return res.status(400).json({ error: 'Loại đối tượng báo cáo không hợp lệ' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
+      return res.status(400).json({ error: 'ID đối tượng không hợp lệ' });
+    }
+
+    const report = await Report.create({
+      reporterId: new mongoose.Types.ObjectId(req.user.id),
+      targetType,
+      targetId: new mongoose.Types.ObjectId(targetId),
+      reason: String(reason).trim(),
+      description: description ? String(description).trim() : '',
+      status: 'open',
+    });
+
+    // Populate reporter information for real-time update in Admin Dashboard
+    const populatedReport = await report.populate('reporterId', 'fullName email role');
+
+    // Emit real-time notification to admin
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('admin:new-report', populatedReport);
+    }
+
+    return res.status(201).json({ message: 'Gửi báo cáo thành công', report: populatedReport });
+  } catch (error) {
+    console.error('Tạo báo cáo thất bại:', error);
     return res.status(500).json({ error: 'Lỗi máy chủ nội bộ' });
   }
 };
