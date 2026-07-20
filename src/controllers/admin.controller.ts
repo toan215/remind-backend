@@ -474,6 +474,7 @@ export const getReports: RequestHandler = async (req, res) => {
 
     const reports = await Report.find(filter)
       .select('reporterId targetType targetId reason description status resolutionAction resolvedBy resolvedAt createdAt')
+      .populate('reporterId', 'fullName email role')
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();

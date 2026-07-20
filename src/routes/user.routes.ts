@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middlewares/auth.middleware';
-import { getProfile, updateProfile, changePassword, uploadAvatar } from '../controllers/user.controller';
+import { getProfile, updateProfile, changePassword, uploadAvatar, createReport } from '../controllers/user.controller';
 
 const router = Router();
 
@@ -17,5 +17,6 @@ router.get('/profile', requireAuth, getProfile);
 router.put('/profile', requireAuth, updateProfile);
 router.put('/change-password', requireAuth, changePassword);
 router.put('/avatar', requireAuth, upload.single('avatar'), uploadAvatar);
+router.post('/reports', requireAuth, createReport);
 
 export default router;
