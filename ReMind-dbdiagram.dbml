@@ -1,0 +1,352 @@
+// ReMind Platform - DBML schema for dbdiagram.io
+// Copy and paste this whole snippet directly into https://dbdiagram.io/
+
+Project ReMind {
+  database_type: 'MongoDB'
+  Note: 'ReMind Database Design - Generated from Backend Mongoose Models'
+}
+
+Table users {
+  _id ObjectId [pk]
+  email varchar [not null, unique, note: 'User email']
+  password varchar [note: 'Hashed password, select: false']
+  refreshToken varchar [note: 'JWT refresh token, select: false']
+  fullName varchar
+  googleId varchar [unique, note: 'Google OAuth ID']
+  role varchar [not null, note: 'student | expert | admin | system_manager']
+  status varchar [default: 'pending', note: 'active | pending | rejected | banned']
+  avatar varchar
+  isAnonymous boolean [default: false]
+  isValidatedExpert boolean [default: false, note: 'Admin validated expert status']
+  
+  // Embedded Expert details (flattened for ERD visualization)
+  expert_professionalTitle varchar
+  expert_bio text
+  expert_specialties text
+  expert_languages text
+  expert_yearsOfExperience int [default: 0]
+  expert_licenseNumber varchar
+  expert_issuedBy varchar
+  expert_verificationStatus varchar
+  expert_reviewedBy ObjectId [ref: > users._id]
+  expert_reviewedAt timestamp
+  expert_rejectionReason text
+  expert_completedSessionCount int [default: 0]
+  expert_averageRating float [default: 0]
+  expert_reviewCount int [default: 0]
+
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (role, status)
+  }
+}
+
+Table subscription_plans {
+  _id ObjectId [pk]
+  name varchar [not null]
+  price decimal [not null]
+  currency varchar [default: 'VND']
+  billingPeriod varchar [not null, note: 'monthly | yearly']
+  includedExpertSessions int [default: 0]
+  aiChatLimitPerMonth int [default: 0]
+  expertSessionValue decimal [default: 0]
+  platformFeeRate float [default: 0]
+  isActive boolean [default: true]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table student_subscriptions {
+  _id ObjectId [pk]
+  studentId ObjectId [not null, unique, ref: - users._id]
+  planId ObjectId [ref: > subscription_plans._id]
+  status varchar [default: 'active', note: 'active | expired | cancelled']
+  currentPeriodStartAt timestamp
+  currentPeriodEndAt timestamp
+  remainingExpertSessions int [default: 0]
+  lockedExpertSessions int [default: 0]
+  remainingAiChatMessages int [default: 0]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table student_credit_wallets {
+  _id ObjectId [pk]
+  studentId ObjectId [not null, unique, ref: - users._id]
+  expertSessionCredits int [default: 0]
+  freeExpertSessionCredits int [default: 0]
+  aiChatMessageCredits int [default: 0]
+  updatedAt timestamp
+}
+
+Table credit_packages {
+  _id ObjectId [pk]
+  name varchar [not null]
+  type varchar [not null, note: 'expert_sessions | ai_chat_messages']
+  quantity int [not null]
+  price decimal [not null]
+  currency varchar [default: 'VND']
+  isActive boolean [default: true]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table credit_transactions {
+  _id ObjectId [pk]
+  studentId ObjectId [not null, ref: > users._id]
+  type varchar [not null, note: 'expert_session | free_expert_session | ai_chat_message']
+  direction varchar [not null, note: 'add | lock | use | release | refund | adjust']
+  quantity int [not null]
+  source varchar [not null, note: 'subscription | purchase | organization | trial | volunteer | admin_adjustment']
+  paymentId ObjectId [ref: > payments._id]
+  note text
+  createdAt timestamp
+
+  Indexes {
+    (studentId, createdAt)
+  }
+}
+
+Table payments {
+  _id ObjectId [pk]
+  userId ObjectId [not null, ref: > users._id]
+  kind varchar [not null, note: 'credit_package | subscription_plan | appointment']
+  productId ObjectId
+  appointmentId ObjectId [ref: > appointments._id]
+  productSnapshot json
+  amount decimal [not null]
+  currency varchar [default: 'VND']
+  status varchar [default: 'pending', note: 'pending | succeeded | failed | cancelled']
+  orderCode bigint [not null, unique, note: 'PayOS Order Code']
+  provider varchar [default: 'payos']
+  providerPaymentLinkId varchar
+  checkoutUrl text
+  qrCode text
+  paidAt timestamp
+  expiresAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (userId, createdAt)
+    status
+  }
+}
+
+Table otps {
+  _id ObjectId [pk]
+  email varchar [not null]
+  otp varchar [not null]
+  expiresAt timestamp [not null, note: 'TTL Index']
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    expiresAt
+    email
+  }
+}
+
+Table expert_slots {
+  _id ObjectId [pk]
+  expertId ObjectId [not null, ref: > users._id]
+  startAt timestamp [not null]
+  endAt timestamp [not null]
+  price decimal [not null, note: 'VND / Session']
+  status varchar [default: 'available', note: 'available | booked | unavailable']
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (expertId, startAt)
+    status
+  }
+}
+
+Table appointments {
+  _id ObjectId [pk]
+  studentId ObjectId [not null, ref: > users._id]
+  expertId ObjectId [not null, ref: > users._id]
+  slotId ObjectId [not null, ref: > expert_slots._id]
+  subscriptionId ObjectId [ref: > student_subscriptions._id]
+  paymentId ObjectId [ref: > payments._id]
+  amount decimal
+  status varchar [not null, note: 'confirmed | in_progress | completed | cancelled | no_show | rescheduled | pending_payment | booked']
+  creditSource varchar
+  scheduledStartAt timestamp [not null]
+  scheduledEndAt timestamp [not null]
+  cancelledBy ObjectId [ref: > users._id]
+  cancelledByRole varchar
+  cancellationReason text
+  cancelledAt timestamp
+  creditRefunded boolean [default: false]
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (studentId, status)
+    (expertId, status)
+    slotId
+  }
+}
+
+Table chat_rooms {
+  _id ObjectId [pk]
+  type varchar [not null, note: 'direct | group']
+  appointmentId ObjectId [ref: > appointments._id]
+  createdBy ObjectId [not null, ref: > users._id]
+  status varchar [default: 'active', note: 'active | closed | archived']
+  lastMessageText text
+  lastMessageSenderId ObjectId [ref: > users._id]
+  lastMessageSentAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (type, appointmentId)
+  }
+}
+
+Table chat_room_participants {
+  _id ObjectId [pk]
+  chatRoomId ObjectId [not null, ref: > chat_rooms._id]
+  userId ObjectId [not null, ref: > users._id]
+  role varchar [not null]
+  status varchar [default: 'active', note: 'active | removed']
+  joinedAt timestamp
+}
+
+Table chat_messages {
+  _id ObjectId [pk]
+  chatRoomId ObjectId [not null, ref: > chat_rooms._id]
+  senderId ObjectId [not null, ref: > users._id]
+  senderRole varchar [not null]
+  messageType varchar [default: 'text', note: 'text | image | file | system']
+  text text
+  fileId ObjectId
+  status varchar [default: 'active', note: 'active | hidden | deleted']
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (chatRoomId, createdAt)
+  }
+}
+
+Table chat_invitations {
+  _id ObjectId [pk]
+  chatRoomId ObjectId [not null, ref: > chat_rooms._id]
+  invitedUserId ObjectId [not null, ref: > users._id]
+  invitedRole varchar
+  invitedBy ObjectId [not null, ref: > users._id]
+  invitedByRole varchar
+  status varchar [default: 'pending', note: 'pending | accepted | rejected | cancelled']
+  reason text
+  respondedAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (chatRoomId, invitedUserId)
+    (invitedUserId, status)
+  }
+}
+
+Table forums {
+  _id ObjectId [pk]
+  title varchar [not null]
+  description text [not null]
+  category varchar [not null]
+  createdByAdminId ObjectId [not null, ref: > users._id]
+  isActive boolean [default: true]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table forum_posts {
+  _id ObjectId [pk]
+  forumId ObjectId [not null, ref: > forums._id]
+  authorId ObjectId [not null, ref: > users._id]
+  authorDisplayMode int [not null, note: '0: Full Name, 1: Anonymous']
+  publicAuthorName varchar [not null]
+  title varchar [not null]
+  content text [not null]
+  tags text
+  status varchar [default: 'active', note: 'active | hidden | deleted | under_review']
+  likeCount int [default: 0]
+  commentCount int [default: 0]
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (forumId, status, createdAt)
+  }
+}
+
+Table forum_comments {
+  _id ObjectId [pk]
+  postId ObjectId [not null, ref: > forum_posts._id]
+  authorId ObjectId [not null, ref: > users._id]
+  authorDisplayMode int [not null, note: '0: Full Name, 1: Anonymous']
+  publicAuthorName varchar [not null]
+  content text [not null]
+  status varchar [default: 'active', note: 'active | hidden | deleted | under_review']
+  likeCount int [default: 0]
+  parentId ObjectId [ref: > forum_comments._id]
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (postId, status)
+  }
+}
+
+Table reports {
+  _id ObjectId [pk]
+  reporterId ObjectId [not null, ref: > users._id]
+  targetType varchar [not null, note: 'user | expert | post | comment | message | bug']
+  targetId ObjectId [not null]
+  reason varchar [not null]
+  description text
+  status varchar [default: 'open', note: 'open | reviewing | resolved | dismissed']
+  resolutionAction text
+  resolvedBy ObjectId [ref: > users._id]
+  resolvedAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+
+  Indexes {
+    (status, createdAt)
+    (targetType, targetId)
+  }
+}
+
+Table notifications {
+  _id ObjectId [pk]
+  recipient ObjectId [not null, ref: > users._id]
+  sender ObjectId [ref: > users._id]
+  type varchar [not null, note: 'NEW_EXPERT | LIKE_POST | COMMENT_POST | REPLY_COMMENT | POST_APPROVED | EXPERT_APPROVED | EXPERT_REJECTED | SYSTEM']
+  content text
+  referenceId ObjectId
+  isRead boolean [default: false]
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+Table logs {
+  _id ObjectId [pk]
+  actorId ObjectId [not null, ref: > users._id]
+  actorRole varchar [not null]
+  action varchar [not null]
+  targetType varchar
+  targetId ObjectId
+  metadata json
+  createdAt timestamp
+
+  Indexes {
+    (actorId, createdAt)
+    (action, createdAt)
+  }
+}

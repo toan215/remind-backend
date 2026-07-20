@@ -1,1281 +1,522 @@
 # ReMind MongoDB Database Design
 
-Source plan: `ReMind-platformsupport.md`
+Nguồn tham chiếu: `backend/src/models/*.ts` (Cập nhật mới nhất theo codebase backend).
 
-## Core Rules
+## 1. Nguyên tắc cốt lõi (Core Rules)
 
-- Use MongoDB as the primary database.
-- All user accounts are stored in `users` collection with MongoDB ObjectId `_id` as the primary identifier.
-- Do not store fields with `null` values. Omit fields that do not apply.
-- Frontend does not write directly to MongoDB.
-- Backend Express.js/Fastify API performs all writes and validations.
-- Client reads data through authenticated API endpoints that filter sensitive fields.
-- Sensitive/private/business data is returned through backend APIs with proper authorization.
-- Backend writes logs for important changes.
+- **Cơ sở dữ liệu chính (Primary Database)**: Sử dụng MongoDB với Mongoose ODM trong Node.js / Express.
+- **Định danh tài khoản (User Identifier)**: Tất cả tài khoản lưu tại collection `users` dùng ObjectId (`_id`) làm khóa chính.
+- **Tối ưu hóa dữ liệu không tồn tại (No Null Fields)**: Không lưu trữ các field mang giá trị `null` trừ khi cần thiết cho logic query.
+- **Truy cập trực tiếp (Direct Access Policy)**: Frontend không bao giờ trực tiếp thao tác ghi/đọc dữ liệu MongoDB mà luôn thông qua backend REST/Socket API.
+- **Audit Logging**: Tất cả các thao tác thay đổi dữ liệu quan trọng (mua hàng, đổi trạng thái, duyệt bài, đặt lịch...) phải tạo log ở collection `logs`.
 
-## Actors
+---
 
-- `guest`: unauthenticated visitor.
-- `student`: user receiving support.
-- `expert`: psychological expert.
-- `manager`: organization staff account.
-- `organization`: company/school/group container, not a login account.
-- `admin`: platform operations staff.
-- `system_manager`: top-level role that manages admins and platform permissions.
+## 2. Vai trò người dùng (Actors & Roles)
 
-## Added Actors And Feature Areas
+Trong hệ thống backend hiện tại (`user.model.ts`), các vai trò (`role`) chính thức bao gồm:
+- `student`: Học sinh / Sinh viên / Người dùng cần hỗ trợ tâm lý.
+- `expert`: Chuyên gia tâm lý / Tư vấn viên đã đăng ký.
+- `admin`: Quản trị viên nền tảng (duyệt bài, duyệt chuyên gia, xử lý báo cáo).
+- `system_manager`: Quản trị viên hệ thống cấp cao.
 
-The original requirement document listed guests, students, psychological experts, and admins. This database design also adds these explicit actors/participants:
+---
 
-- `manager`: manages organization members, invitations, join codes, and organization credit allocation.
-- `organization`: owns group subscriptions, member seats, and pooled credits.
-- `system_manager`: manages admin accounts, admin permissions, and high-level platform controls.
-- `ai`: non-human chat participant used in AI chat rooms and risk detection records.
+## 3. Danh sách Collections Đã Triển Khai (Implemented Collections - 19 Models)
 
-The design also expands the original features into these database-backed areas:
+### 3.1. `users`
+Lưu trữ toàn bộ tài khoản trong hệ thống.
 
-- Authentication profiles, anonymous student mode, and role-based account status.
-- Expert onboarding, license/certification review, approval, availability, slots, and performance stats.
-- Student subscriptions, subscription plans, extra credit packages, wallets, and credit transaction ledger.
-- Payments, payment provider references, expert payouts, platform commission, and trial-abuse prevention.
-- Appointment booking, slot locking, cancellation, rescheduling, completion, no-show, and credit release/use logic.
-- AI chat, appointment chat, crisis support chat, group support chat, chat messages, and chat invitations.
-- Crisis/urgent support requests, self-reported risk, AI risk detection, emergency resources, and on-call experts.
-- Forums, forum posts, forum comments, anonymous public display, and moderation status.
-- Reports for users, experts, appointments, forum content, chat messages, and technical bugs.
-- Ratings after completed appointments and admin-reviewed report impact on expert performance.
-- Organization subscriptions, organization members, organization invitations, join codes, redemptions, and student credit allocation.
-- Expert-to-organization de-identified performance sharing and organization-safe expert reports.
-- Notifications, files, optimized image variants, signed access for sensitive files, logs, platform settings, policies, consents, and analytics summaries.
-
-## Collections
-
-### users
-
-Stores every login account.
-
-```javascript
+```typescript
 {
   _id: ObjectId,
-  email: String,
-  fullName: String,
-  avatar: String,
-  isAnonymous: Boolean,
-  phone: String,
-  role: String, // student | expert | manager | admin | system_manager
-  status: String, // active | pending | rejected | banned
-  activeSubscriptionId: ObjectId,
-  paymentCustomerId: String,
-  defaultPaymentMethodId: String,
-  hasUsedTrial: Boolean,
-  phoneVerified: Boolean,
-  riskLevel: String, // low | medium | high
-  createdAt: Date,
-  updatedAt: Date,
-  lastLoginAt: Date,
-
-  student: {
-    anonymousDisplayName: String,
-    dateOfBirth: Date,
-    gender: String,
-    schoolName: String,
-    educationLevel: String,
-    emergencyContact: {
-      name: String,
-      phone: String,
-      relationship: String
-    },
-    preferences: Object
-  },
-
-  expert: {
+  email: String, // required, unique, lowercase, trim
+  password?: String, // select: false
+  refreshToken?: String, // select: false
+  fullName?: String, // trim
+  googleId?: String, // sparse, unique (Google OAuth)
+  role: String, // 'student' | 'expert' | 'admin' | 'system_manager' (required)
+  status: String, // 'active' | 'pending' | 'rejected' | 'banned' (default: 'pending')
+  avatar: String, // default: ""
+  isAnonymous: Boolean, // default: false
+  isValidatedExpert: Boolean, // default: false (điều kiện để chuyên gia tạo slot)
+  
+  // Thông tin mở rộng dành cho Expert
+  expert?: {
     profile: {
-      professionalTitle: String,
-      bio: String,
-      profileSummary: String,
-      yearsOfExperience: Number,
+      professionalTitle?: String,
+      bio?: String,
+      specialties: [String],
       languages: [String],
-      consultationMethods: [String]
+      yearsOfExperience: Number // default: 0
     },
-    specialties: [String],
-    education: [
-      {
-        degree: String,
-        school: String,
-        major: String,
-        graduationYear: Number
-      }
-    ],
-    certifications: [
-      {
-        name: String,
-        issuedBy: String,
-        issuedAt: Date,
-        fileId: ObjectId
-      }
-    ],
     license: {
-      licenseNumber: String,
-      issuedBy: String,
-      issuedAt: Date,
-      expiresAt: Date,
-      fileIds: [ObjectId],
-      verificationStatus: String
+      licenseNumber?: String,
+      issuedBy?: String,
+      verificationStatus?: String
     },
-    consultationSettings: {
-      sessionDurationMinutes: Number,
-      maxSessionsPerDay: Number,
-      acceptsVolunteerSessions: Boolean,
-      volunteerSessionLimitPerMonth: Number,
-      volunteerSessionUsedThisMonth: Number
-    },
+    credentials: [
+      {
+        fileId?: ObjectId,
+        fileName?: String,
+        uploadedAt: Date // default: Date.now
+      }
+    ],
     approval: {
-      reviewedBy: ObjectId,
-      reviewedAt: Date,
-      rejectionReason: String
+      reviewedBy?: ObjectId, // ref: 'User'
+      reviewedAt?: Date,
+      rejectionReason?: String
     },
     performanceStats: {
-      completedSessionCount: Number,
-      cancelledByExpertCount: Number,
-      noShowCount: Number,
-      lateComplaintCount: Number,
-      validComplaintCount: Number,
-      averageRating: Number,
-      responseTimeAvgMinutes: Number,
-      lastCalculatedAt: Date
+      completedSessionCount: Number, // default: 0
+      averageRating: Number, // default: 0
+      reviewCount: Number // default: 0
     }
   },
-
-  admin: {
-    permissions: Object
-  },
-
-  systemManager: {
-    permissions: Object
-  }
-}
-```
-
-### subscriptionPlans
-
-Plan templates used by individual students and organizations.
-
-```javascript
-{
-  _id: ObjectId,
-  name: String,
-  price: Number,
-  currency: String,
-  billingPeriod: String, // monthly | yearly
-  trialDays: Number,
-  includedExpertSessions: Number,
-  aiChatLimitPerMonth: Number,
-  forumPostLimitPerDay: Number,
-  expertSessionValue: Number,
-  platformFeeRate: Number,
-  canMessageExperts: Boolean,
-  canUseAnonymousMode: Boolean,
-  isActive: Boolean,
   createdAt: Date,
   updatedAt: Date
 }
 ```
 
-### studentSubscriptions
+---
 
-Actual subscription owned by a student.
+### 3.2. `subscriptionPlans`
+Danh sách gói đăng ký (Plan templates) do Admin tạo.
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  studentId: ObjectId,
-  planId: ObjectId,
-  paymentCustomerId: String,
-  status: String, // trialing | active | expired | cancelled | replaced
-  currentPeriodStartAt: Date,
-  currentPeriodEndAt: Date,
-  trialEndsAt: Date,
-  remainingExpertSessions: Number,
-  lockedExpertSessions: Number,
-  remainingAiChatMessages: Number,
-  replacedBySubscriptionId: ObjectId,
+  name: String, // required, trim
+  price: Number, // required
+  currency: String, // default: 'VND'
+  billingPeriod: String, // 'monthly' | 'yearly' (required)
+  includedExpertSessions: Number, // default: 0
+  aiChatLimitPerMonth: Number, // default: 0
+  expertSessionValue: Number, // default: 0
+  platformFeeRate: Number, // default: 0
+  isActive: Boolean, // default: true
   createdAt: Date,
   updatedAt: Date
 }
 ```
 
-### studentCreditWallets
+---
 
-Fast balance for credits. Purchased credits never expire.
+### 3.3. `studentSubscriptions`
+Thông tin gói dịch vụ hiện tại mà học sinh/sinh viên đang đăng ký.
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  studentId: ObjectId,
-  expertSessionCredits: Number,
-  freeExpertSessionCredits: Number,
-  aiChatMessageCredits: Number,
-  updatedAt: Date
-}
-```
-
-### creditTransactions
-
-Ledger for every credit change.
-
-```javascript
-{
-  _id: ObjectId,
-  studentId: ObjectId,
-  type: String, // expert_session | free_expert_session | ai_chat_message
-  direction: String, // add | lock | use | release | refund | adjust
-  quantity: Number,
-  source: String, // subscription | purchase | organization | trial | volunteer | admin_adjustment
-  appointmentId: ObjectId,
-  paymentId: ObjectId,
-  chatRoomId: ObjectId,
-  messageId: ObjectId,
-  createdAt: Date,
-  note: String
-}
-```
-
-### creditPackages
-
-Extra purchasable credits.
-
-```javascript
-{
-  _id: ObjectId,
-  name: String,
-  type: String, // expert_sessions | ai_chat_messages
-  quantity: Number,
-  price: Number,
-  currency: String,
-  isActive: Boolean,
+  studentId: ObjectId, // ref: 'User', required, unique (1 student - 1 active sub)
+  planId?: ObjectId, // ref: 'SubscriptionPlan'
+  status: String, // 'active' | 'expired' | 'cancelled' (default: 'active')
+  currentPeriodStartAt?: Date,
+  currentPeriodEndAt?: Date,
+  remainingExpertSessions: Number, // default: 0
+  lockedExpertSessions: Number, // default: 0
+  remainingAiChatMessages: Number, // default: 0
   createdAt: Date,
   updatedAt: Date
 }
 ```
 
-### payments
+---
 
-Payment history only. Do not store card data.
+### 3.4. `studentCreditWallets`
+Ví lưu trữ lượt tư vấn / lượt chat AI còn dư của học sinh.
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  studentId: ObjectId,
-  organizationId: ObjectId,
-  subscriptionId: ObjectId,
-  creditPackageId: ObjectId,
-  provider: String, // stripe | momo | vnpay | paypal | other
-  providerPaymentId: String,
-  amount: Number,
-  currency: String,
-  status: String, // pending | succeeded | failed | refunded
-  paidAt: Date,
+  studentId: ObjectId, // ref: 'User', required, unique
+  expertSessionCredits: Number, // default: 0
+  freeExpertSessionCredits: Number, // default: 0
+  aiChatMessageCredits: Number, // default: 0
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.5. `creditPackages`
+Các gói mua thêm lượt lẻ (Credits Package) khả dụng.
+
+```typescript
+{
+  _id: ObjectId,
+  name: String, // required, trim
+  type: String, // 'expert_sessions' | 'ai_chat_messages' (required)
+  quantity: Number, // required
+  price: Number, // required
+  currency: String, // default: 'VND'
+  isActive: Boolean, // default: true
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.6. `creditTransactions`
+Sổ nhật ký ghi nhận toàn bộ biến động lượt tư vấn/chat.
+
+```typescript
+{
+  _id: ObjectId,
+  studentId: ObjectId, // ref: 'User', required
+  type: String, // 'expert_session' | 'free_expert_session' | 'ai_chat_message' (required)
+  direction: String, // 'add' | 'lock' | 'use' | 'release' | 'refund' | 'adjust' (required)
+  quantity: Number, // required
+  source: String, // 'subscription' | 'purchase' | 'organization' | 'trial' | 'volunteer' | 'admin_adjustment' (required)
+  paymentId?: ObjectId, // ref: 'Payment'
+  note?: String,
   createdAt: Date
 }
 ```
 
-### trialClaims
+---
 
-Prevents trial abuse across many accounts.
+### 3.7. `payments`
+Lịch sử giao dịch thanh toán qua cổng thanh toán (PayOS / Gateway).
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  claimKey: String, // unique identifier (hashed fingerprint)
-  keyType: String, // payment_method | phone | device | ip_risk
-  claimedByUserId: ObjectId,
-  createdAt: Date,
-  expiresAt: Date
-}
-```
-
-Use hashed fingerprints only. Never store real card numbers or raw device identifiers.
-
-### otps
-
-Stores OTP (One-Time Password) codes used for password recovery/reset password flows.
-
-```javascript
-{
-  _id: ObjectId,
-  email: String, // index: email: 1
-  otp: String,
-  expiresAt: Date // TTL index: expiresAt: 1, expireAfterSeconds: 0
-}
-```
-
-### expertAvailability
-
-Expert weekly schedule settings.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  weeklySchedule: Object,
-  blockedDates: [Date],
-  slotDurationMinutes: Number,
-  bufferMinutes: Number,
-  maxSessionsPerDay: Number,
-  autoGenerateSlots: Boolean,
-  generatedUntil: Date,
-  updatedAt: Date
-}
-```
-
-### expertSlots
-
-Concrete bookable slots generated from availability.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  startAt: Date,
-  endAt: Date,
-  status: String, // available | locked | booked | cancelled | expired
-  appointmentId: ObjectId,
-  lockedByStudentId: ObjectId,
-  lockedUntil: Date,
+  userId: ObjectId, // ref: 'User', required
+  kind: String, // 'credit_package' | 'subscription_plan' | 'appointment' (required)
+  productId?: ObjectId,
+  appointmentId?: ObjectId, // ref: 'Appointment'
+  productSnapshot?: Mixed,
+  amount: Number, // required
+  currency: String, // default: 'VND'
+  status: String, // 'pending' | 'succeeded' | 'failed' | 'cancelled' (default: 'pending')
+  orderCode: Number, // required, unique (PayOS numeric order code)
+  provider: String, // default: 'payos'
+  providerPaymentLinkId?: String,
+  checkoutUrl?: String,
+  qrCode?: String,
+  paidAt?: Date,
+  expiresAt?: Date,
   createdAt: Date,
   updatedAt: Date
 }
 ```
 
-### appointments
+---
 
-Consultation booking.
+### 3.8. `otps`
+Mã xác thực dùng một lần (Mã OTP khôi phục mật khẩu).
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  studentId: ObjectId,
-  expertId: ObjectId,
-  slotId: ObjectId,
-  subscriptionId: ObjectId,
-  status: String, // confirmed | in_progress | completed | cancelled | no_show | rescheduled
-  creditSource: String,
-  creditType: String,
-  creditStatus: String,
-  scheduledStartAt: Date,
-  scheduledEndAt: Date,
-  expertJoinedAt: Date,
-  studentJoinedAt: Date,
-  actualStartAt: Date,
-  actualEndAt: Date,
-  expertSessionRate: Number,
-  platformFeeRate: Number,
-  platformFeeAmount: Number,
-  expertPayoutAmount: Number,
-  payoutStatus: String,
-  studentNote: String,
-  expertNote: String,
-  cancellation: {
-    cancelledBy: ObjectId,
-    cancelledByRole: String,
-    reason: String,
-    cancelledAt: Date,
-    creditRefunded: Boolean
+  email: String, // required, lowercase, trim
+  otp: String, // required
+  expiresAt: Date, // required (TTL Index: tự động xóa khi hết hạn)
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.9. `expertSlots`
+Lịch rảnh (Khung giờ tư vấn) do Chuyên gia tạo cho học sinh đặt lịch.
+
+```typescript
+{
+  _id: ObjectId,
+  expertId: ObjectId, // ref: 'User', required
+  startAt: Date, // required
+  endAt: Date, // required
+  price: Number, // required (Đơn giá VND / lượt tư vấn)
+  status: String, // 'available' | 'booked' | 'unavailable' (default: 'available')
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.10. `appointments`
+Lịch hẹn tư vấn giữa Học sinh và Chuyên gia.
+
+```typescript
+{
+  _id: ObjectId,
+  studentId: ObjectId, // ref: 'User', required
+  expertId: ObjectId, // ref: 'User', required
+  slotId: ObjectId, // ref: 'ExpertSlot', required
+  subscriptionId?: ObjectId, // ref: 'StudentSubscription'
+  paymentId?: ObjectId, // ref: 'Payment'
+  amount?: Number,
+  status: String, // 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show' | 'rescheduled' | 'pending_payment' | 'booked' (required)
+  creditSource?: String,
+  scheduledStartAt: Date, // required
+  scheduledEndAt: Date, // required
+  cancellation?: {
+    cancelledBy: ObjectId, // ref: 'User', required
+    cancelledByRole: String, // required
+    reason: String, // required
+    cancelledAt: Date, // required
+    creditRefunded: Boolean // default: false
   },
-  rescheduleOfAppointmentId: ObjectId,
   createdAt: Date,
   updatedAt: Date
 }
 ```
 
-### chatRooms
+---
 
-Supports AI chat, appointment chat, crisis support, and group support.
+### 3.11. `chatRooms`
+Phòng nhắn tin riêng (Direct) hoặc phòng chat nhóm (Group).
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  type: String, // ai | appointment | crisis_support | group_support
-  appointmentId: ObjectId,
-  supportRequestId: ObjectId,
-  studentId: ObjectId,
-  createdBy: ObjectId,
+  type: String, // 'direct' | 'group' (required)
+  appointmentId?: ObjectId, // ref: 'Appointment'
+  createdBy: ObjectId, // ref: 'User', required
   participants: [
     {
-      userId: ObjectId,
-      role: String,
-      status: String, // active | removed
-      joinedAt: Date
+      userId: ObjectId, // ref: 'User', required
+      role: String, // required
+      status: String, // 'active' | 'removed' (default: 'active')
+      joinedAt: Date // default: Date.now
     }
   ],
-  invitationPolicy: {
-    allowedInviterRoles: [String],
-    allowedInviteeRoles: [String]
+  status: String, // 'active' | 'closed' | 'archived' (default: 'active')
+  lastMessage?: {
+    text?: String,
+    senderId?: ObjectId, // ref: 'User'
+    sentAt?: Date
   },
-  status: String, // active | closed | archived
-  latestRiskLevel: String, // none | low | medium | high | emergency
-  latestRiskFlags: [String],
-  lastRiskCheckedAt: Date,
   createdAt: Date,
   updatedAt: Date
 }
 ```
 
-### chatMessages
+---
 
-Real-time chat messages. Backend writes only.
+### 3.12. `chatMessages`
+Tin nhắn trò chuyện trong các `chatRooms`.
 
-```javascript
+```typescript
 {
   _id: ObjectId,
-  chatRoomId: ObjectId,
-  senderId: ObjectId,
-  senderRole: String, // student | expert | admin | ai | manager
-  messageType: String, // text | image | file | system
-  text: String,
-  fileId: ObjectId,
-  risk: {
-    level: String,
-    flags: [String],
-    checkedAt: Date
-  },
-  editedAt: Date,
-  deletedAt: Date,
-  readBy: [ObjectId],
+  chatRoomId: ObjectId, // ref: 'ChatRoom', required
+  senderId: ObjectId, // ref: 'User', required
+  senderRole: String, // required
+  messageType: String, // 'text' | 'image' | 'file' | 'system' (default: 'text')
+  text?: String, // trim
+  fileId?: ObjectId, // ref: 'File'
+  status: String, // 'active' | 'hidden' | 'deleted' (default: 'active')
+  readBy: [ObjectId], // ref: 'User', default: []
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.13. `chatInvitations`
+Lời mời tham gia phòng nhắn tin.
+
+```typescript
+{
+  _id: ObjectId,
+  chatRoomId: ObjectId, // ref: 'ChatRoom', required
+  invitedUserId: ObjectId, // ref: 'User', required
+  invitedRole?: String,
+  invitedBy: ObjectId, // ref: 'User', required
+  invitedByRole?: String,
+  status: String, // 'pending' | 'accepted' | 'rejected' | 'cancelled' (default: 'pending')
+  reason?: String, // trim
+  respondedAt?: Date,
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.14. `forums`
+Danh mục Diễn đàn do Admin quản lý.
+
+```typescript
+{
+  _id: ObjectId,
+  title: String, // required, trim
+  description: String, // required, trim
+  category: String, // required, trim
+  createdByAdminId: ObjectId, // ref: 'User', required
+  isActive: Boolean, // default: true
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.15. `forumPosts`
+Bài đăng trên Diễn đàn của người dùng.
+
+```typescript
+{
+  _id: ObjectId,
+  forumId: ObjectId, // ref: 'Forum', required
+  authorId: ObjectId, // ref: 'User', required
+  authorDisplayMode: Number, // 0: Hiển thị tên thật, 1: Ẩn danh (required)
+  publicAuthorName: String, // required, trim (đã xử lý hiển thị ở server)
+  title: String, // required, trim
+  content: String, // required, trim
+  tags: [String], // default: []
+  status: String, // 'active' | 'hidden' | 'deleted' | 'under_review' (default: 'active')
+  likeCount: Number, // default: 0
+  likedBy: [ObjectId], // ref: 'User', default: []
+  commentCount: Number, // default: 0
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.16. `forumComments`
+Bình luận bài viết Diễn đàn (hỗ trợ trả lời lồng ghép bằng `parentId`).
+
+```typescript
+{
+  _id: ObjectId,
+  postId: ObjectId, // ref: 'ForumPost', required
+  authorId: ObjectId, // ref: 'User', required
+  authorDisplayMode: Number, // 0: Tên thật, 1: Ẩn danh (required)
+  publicAuthorName: String, // required, trim
+  content: String, // required, trim
+  status: String, // 'active' | 'hidden' | 'deleted' | 'under_review' (default: 'active')
+  likeCount: Number, // default: 0
+  likedBy: [ObjectId], // ref: 'User'
+  parentId?: ObjectId, // ref: 'ForumComment', default: null
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.17. `reports`
+Báo cáo vi phạm nội dung hoặc sự cố hệ thống.
+
+```typescript
+{
+  _id: ObjectId,
+  reporterId: ObjectId, // ref: 'User', required
+  targetType: String, // 'user' | 'expert' | 'post' | 'comment' | 'message' | 'bug' (required)
+  targetId: ObjectId, // required
+  reason: String, // required, trim
+  description?: String, // trim
+  status: String, // 'open' | 'reviewing' | 'resolved' | 'dismissed' (default: 'open')
+  resolutionAction?: String, // trim
+  resolvedBy?: ObjectId, // ref: 'User'
+  resolvedAt?: Date,
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.18. `notifications`
+Thông báo gửi tới người dùng.
+
+```typescript
+{
+  _id: ObjectId,
+  recipient: ObjectId, // ref: 'User', required
+  sender?: ObjectId, // ref: 'User'
+  type: String, // 'NEW_EXPERT' | 'LIKE_POST' | 'COMMENT_POST' | 'REPLY_COMMENT' | 'POST_APPROVED' | 'EXPERT_APPROVED' | 'EXPERT_REJECTED' | 'SYSTEM' (required)
+  content?: String,
+  referenceId?: ObjectId, // ID tham chiếu bài viết, comment...
+  isRead: Boolean, // default: false
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+---
+
+### 3.19. `logs`
+Nhật ký kiểm toán hệ thống (System Audit Logs).
+
+```typescript
+{
+  _id: ObjectId,
+  actorId: ObjectId, // ref: 'User', required
+  actorRole: String, // required
+  action: String, // required, trim
+  targetType?: String, // trim
+  targetId?: ObjectId,
+  metadata?: Mixed,
   createdAt: Date
 }
 ```
 
-### chatInvitations
+---
 
-Chat invitation request.
+## 4. Các Chỉ MụcMongoDB Cần Thiết (Essential MongoDB Indexes)
 
-```javascript
-{
-  _id: ObjectId,
-  chatRoomId: ObjectId,
-  invitedUserId: ObjectId,
-  invitedRole: String,
-  invitedBy: ObjectId,
-  invitedByRole: String,
-  status: String, // pending | accepted | rejected | cancelled
-  reason: String,
-  createdAt: Date,
-  respondedAt: Date
-}
-```
-
-Invitation rules:
-
-- Appointment/crisis chats: expert/admin can invite expert/admin only.
-- Group support chats: expert/admin can invite students or experts.
-- Invited users must accept or reject.
-- AI chat has no invitations.
-
-### supportRequests
-
-Crisis or urgent support queue.
+Dưới đây là các Indexes đã được khai báo trong các Mongoose Model để tối ưu hiệu năng truy vấn:
 
 ```javascript
-{
-  _id: ObjectId,
-  studentId: ObjectId,
-  type: String, // crisis | normal_support | technical
-  severity: String, // low | medium | high | emergency
-  source: String, // self_report | ai_detected | expert_flagged | admin_flagged
-  riskSignals: [String],
-  previewText: String,
-  status: String, // open | assigned | in_progress | resolved | escalated
-  assignedExpertId: ObjectId,
-  assignedAdminId: ObjectId,
-  emergencyMessageShown: Boolean,
-  emergencyMessageShownAt: Date,
-  createdAt: Date,
-  assignedAt: Date,
-  resolvedAt: Date
-}
-```
-
-### expertOnCallStatus
-
-On-call status for immediate/crisis support.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  status: String, // available | busy | offline
-  acceptsCrisisRequests: Boolean,
-  maxActiveCrisisChats: Number,
-  activeCrisisChatCount: Number,
-  updatedAt: Date
-}
-```
-
-### forums
-
-Forum categories created by admins.
-
-```javascript
-{
-  _id: ObjectId,
-  title: String,
-  description: String,
-  category: String,
-  createdByAdminId: ObjectId,
-  isActive: Boolean,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumPosts
-
-Community forum post.
-
-```javascript
-{
-  _id: ObjectId,
-  forumId: ObjectId,
-  authorId: ObjectId,
-  authorDisplayMode: String, // real_name | anonymous
-  publicAuthorName: String,
-  title: String,
-  content: String,
-  tags: [String],
-  status: String, // active | hidden | deleted | under_review
-  likeCount: Number,
-  commentCount: Number,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumComments
-
-Community forum comment.
-
-```javascript
-{
-  _id: ObjectId,
-  postId: ObjectId,
-  authorId: ObjectId,
-  authorDisplayMode: String,
-  publicAuthorName: String,
-  content: String,
-  status: String, // active | hidden | deleted | under_review
-  likeCount: Number,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumGroups
-
-Group discussion rooms.
-
-```javascript
-{
-  _id: ObjectId,
-  forumId: ObjectId,
-  title: String,
-  description: String,
-  createdBy: ObjectId,
-  status: String, // active | closed | archived
-  isPublic: Boolean,
-  maxParticipants: Number,
-  participantCount: Number,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### forumGroupMembers
-
-Who joined which group discussions.
-
-```javascript
-{
-  _id: ObjectId,
-  groupId: ObjectId,
-  userId: ObjectId,
-  role: String, // member | moderator
-  joinedAt: Date,
-  lastReadAt: Date
-}
-```
-
-### forumGroupMessages
-
-Messages in group discussions. Real-time updates via Change Streams.
-
-```javascript
-{
-  _id: ObjectId,
-  groupId: ObjectId,
-  senderId: ObjectId,
-  senderRole: String,
-  senderDisplayName: String,
-  content: String,
-  status: String, // active | hidden | deleted
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### reports
-
-Reports from students, experts, managers, or admins.
-
-```javascript
-{
-  _id: ObjectId,
-  reporterId: ObjectId,
-  reporterRole: String,
-  targetType: String, // user | expert | student | forum_post | forum_comment | appointment | chat_message | technical_bug
-  targetId: ObjectId,
-  studentId: ObjectId,
-  expertId: ObjectId,
-  appointmentId: ObjectId,
-  reasonCategory: String,
-  severity: String,
-  description: String,
-  status: String, // open | reviewing | resolved | dismissed
-  priority: String,
-  assignedAdminId: ObjectId,
-  resolution: String,
-  affectsExpertPerformance: Boolean,
-  createdAt: Date,
-  resolvedAt: Date,
-  resolutionNote: String
-}
-```
-
-Reports affect expert performance only after admin review.
-
-### ratings
-
-Student rating after a completed appointment.
-
-```javascript
-{
-  _id: ObjectId,
-  appointmentId: ObjectId,
-  studentId: ObjectId,
-  expertId: ObjectId,
-  score: Number, // 1-5
-  tags: [String],
-  comment: String,
-  isAnonymousToExpert: Boolean,
-  status: String, // active | hidden | disputed
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### organizations
-
-Organization container.
-
-```javascript
-{
-  _id: ObjectId,
-  name: String,
-  type: String, // school | university | company | nonprofit | other
-  status: String, // active | suspended
-  ownerUserId: ObjectId,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### organizationMembers
-
-Links users to organizations.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  userId: ObjectId,
-  email: String,
-  role: String, // owner | manager | student
-  status: String, // invited | active | removed
-  permissions: Object,
-  joinedBy: String, // invitation | join_code | admin
-  joinCodeId: ObjectId,
-  assignedByAdminId: ObjectId,
-  createdAt: Date,
-  joinedAt: Date
-}
-```
-
-Manager permissions live here, not globally in `users`.
-
-### organizationSubscriptions
-
-Organization subscription and pooled credits.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  planId: ObjectId,
-  status: String, // active | expired | cancelled
-  totalStudentSeats: Number,
-  usedStudentSeats: Number,
-  expertSessionCreditPool: Number,
-  aiChatCreditPool: Number,
-  currentPeriodStartAt: Date,
-  currentPeriodEndAt: Date,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### organizationCreditAllocations
-
-Credits assigned from organization to a student.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  orgSubscriptionId: ObjectId,
-  studentId: ObjectId,
-  allocatedByManagerId: ObjectId,
-  expertSessionCredits: Number,
-  aiChatMessageCredits: Number,
-  usedExpertSessionCredits: Number,
-  usedAiChatMessageCredits: Number,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### organizationInvitations
-
-Email-based invite before account creation.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  orgSubscriptionId: ObjectId,
-  email: String,
-  invitedByManagerId: ObjectId,
-  role: String, // student | manager
-  status: String, // pending | accepted | expired | cancelled
-  expiresAt: Date,
-  createdAt: Date,
-  acceptedByUserId: ObjectId
-}
-```
-
-### organizationJoinCodes
-
-Self-join code / organization promo access.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  orgSubscriptionId: ObjectId,
-  codeHash: String,
-  label: String,
-  status: String, // active | disabled | expired
-  security: {
-    requireEmailDomain: Boolean,
-    allowedEmailDomains: [String],
-    requireManagerApproval: Boolean,
-    maxRedemptions: Number,
-    oneUsePerUser: Boolean,
-    expiresAt: Date
-  },
-  defaultBenefits: {
-    expertSessionCredits: Number,
-    aiChatMessageCredits: Number
-  },
-  redemptionCount: Number,
-  defaultRole: String,
-  createdByManagerId: ObjectId,
-  createdAt: Date
-}
-```
-
-### organizationJoinCodeRedemptions
-
-Tracks join code usage.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  orgSubscriptionId: ObjectId,
-  joinCodeId: ObjectId,
-  studentId: ObjectId,
-  email: String,
-  status: String, // pending_approval | approved | rejected | joined
-  reviewedByManagerId: ObjectId,
-  reviewedAt: Date,
-  createdAt: Date
-}
-```
-
-### expertOrganizationSharing
-
-Expert permission to share de-identified performance data with an organization.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  orgId: ObjectId,
-  status: String, // active | revoked
-  sharedMetrics: [String],
-  includeAnonymousFeedback: Boolean,
-  createdAt: Date,
-  revokedAt: Date
-}
-```
-
-### expertOrgReports
-
-Aggregated/de-identified expert report for organizations.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  expertId: ObjectId,
-  periodStartAt: Date,
-  periodEndAt: Date,
-  completedSessionCount: Number,
-  averageRating: Number,
-  lateComplaintCount: Number,
-  noShowCount: Number,
-  validComplaintCount: Number,
-  anonymousFeedbackSummary: String,
-  generatedAt: Date
-}
-```
-
-Never include student names, chat messages, appointment notes, or crisis details.
-
-### notifications
-
-User notifications.
-
-```javascript
-{
-  _id: ObjectId,
-  userId: ObjectId,
-  type: String, // appointment | chat | report | subscription | organization | system
-  title: String,
-  body: String,
-  targetType: String,
-  targetId: ObjectId,
-  status: String, // unread | read | archived
-  createdAt: Date,
-  readAt: Date
-}
-```
-
-### files
-
-Metadata for uploaded files (stored in GridFS or external storage).
-
-```javascript
-{
-  _id: ObjectId,
-  ownerId: ObjectId,
-  ownerRole: String,
-  storageType: String, // gridfs | s3 | local
-  storagePath: String,
-  gridfsFileId: ObjectId, // if using GridFS
-  variants: {
-    thumbnail: {
-      storagePath: String,
-      width: Number,
-      height: Number,
-      sizeBytes: Number
-    },
-    medium: {
-      storagePath: String,
-      width: Number,
-      height: Number,
-      sizeBytes: Number
-    }
-  },
-  purpose: String, // avatar | license | certification | chat_attachment | report_evidence | forum_image
-  visibility: String, // private | participant_only | public
-  relatedType: String,
-  relatedId: ObjectId,
-  processingStatus: String, // pending | completed | failed
-  uploadedAt: Date
-}
-```
-
-Sensitive files are served by backend-generated signed URLs or through authenticated API endpoints.
-
-### logs
-
-Track important system changes.
-
-```javascript
-{
-  _id: ObjectId,
-  logType: String, // credit | payment | appointment | admin_action | auth | report | organization | settings
-  actorId: ObjectId,
-  actorRole: String,
-  action: String,
-  targetType: String,
-  targetId: ObjectId,
-  before: Object,
-  after: Object,
-  createdAt: Date,
-  metadata: Object
-}
-```
-
-### platformSettings
-
-Admin-configurable platform settings (single document).
-
-```javascript
-{
-  _id: ObjectId,
-  settingKey: String, // 'current'
-  commissionRate: Number,
-  cancellationRefundHours: Number,
-  slotLockMinutes: Number,
-  trial: {
-    enabled: Boolean,
-    trialDays: Number,
-    requirePaymentMethod: Boolean,
-    includedExpertSessions: Number,
-    aiChatLimit: Number
-  },
-  aiUsage: {
-    chargingMode: String,
-    refundOnFailure: Boolean
-  },
-  crisis: {
-    hotlineText: String,
-    highRiskKeywords: [String],
-    emergencyMessage: String,
-    notifyAdminImmediately: Boolean
-  },
-  updatedByAdminId: ObjectId,
-  updatedAt: Date
-}
-```
-
-### policyVersions
-
-Policy/disclaimer versions.
-
-```javascript
-{
-  _id: ObjectId,
-  type: String, // privacy_policy | terms | ai_disclaimer | crisis_disclaimer
-  version: String,
-  contentUrl: String,
-  activeFrom: Date,
-  isActive: Boolean,
-  createdAt: Date
-}
-```
-
-### userConsents
-
-Tracks user consent acceptance.
-
-```javascript
-{
-  _id: ObjectId,
-  userId: ObjectId,
-  consentType: String,
-  version: String,
-  policyId: ObjectId,
-  acceptedAt: Date,
-  ipHash: String,
-  userAgentHash: String
-}
-```
-
-### analyticsDaily
-
-System summary generated by backend jobs.
-
-```javascript
-{
-  _id: ObjectId,
-  date: Date,
-  newUsers: Number,
-  activeStudents: Number,
-  completedAppointments: Number,
-  revenue: Number,
-  expertPayouts: Number,
-  reportCount: Number,
-  crisisRequestCount: Number
-}
-```
-
-### expertAnalyticsDaily
-
-Expert daily summary generated by backend jobs.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  date: Date,
-  completedSessions: Number,
-  cancelledSessions: Number,
-  validComplaints: Number,
-  averageRating: Number,
-  lateComplaintCount: Number
-}
-```
-
-### organizationAnalyticsDaily
-
-Organization daily summary generated by backend jobs.
-
-```javascript
-{
-  _id: ObjectId,
-  orgId: ObjectId,
-  date: Date,
-  activeStudents: Number,
-  expertSessionCreditsUsed: Number,
-  aiChatCreditsUsed: Number,
-  newMembers: Number
-}
-```
-
-## Backend-Only Operations
-
-These must be changed only by backend API with proper authorization:
-
-- Roles and permissions.
-- Expert approval.
-- Subscriptions and payments.
-- Credits and credit transactions.
-- Appointment booking, slot locking, cancellation, completion.
-- Organization membership, join codes, and credit allocation.
-- Performance stats and analytics summaries.
-- Platform settings.
-- Logs.
-- File processing metadata.
-
-## API Authorization Patterns
-
-All API endpoints must implement proper authorization middleware:
-
-### Public Read Access
-- Approved expert profiles (filtered through API)
-- Active forum posts and comments (filtered through API)
-- Public forum group content (read-only for guests)
-
-### Authenticated User Access
-- Own user profile (read/write allowed fields only)
-- Own notifications (read only)
-- Own subscriptions and credit wallet (read only)
-- Participating chat room messages (read/write with validation)
-
-### Role-Based Access
-- **Students**: Create forum posts, join group discussions, report content
-- **Experts**: Update own profile, participate in discussions, view own appointments
-- **Admins**: Approve experts, moderate content, handle reports, manage users
-- **System Managers**: Manage admins, platform settings, high-level controls
-
-### Forbidden Operations
-- Direct database writes from client
-- Reading private expert credentials (admin-only)
-- Accessing other users' private data
-- Modifying roles without admin authorization
-
-## Real-time Forum Group Discussions
-
-Use MongoDB Change Streams with Socket.io:
-
-```javascript
-// Backend: Watch for new messages
-const changeStream = db.collection('forumGroupMessages').watch();
-changeStream.on('change', async (change) => {
-  if (change.operationType === 'insert') {
-    const message = change.fullDocument;
-    // Emit to all connected clients in this group
-    io.to(`group:${message.groupId}`).emit('newMessage', message);
-  }
-});
-
-// Client: Join group room
-socket.emit('joinGroup', { groupId, authToken });
-
-// Backend: Validate auth before allowing join
-socket.on('joinGroup', async ({ groupId, authToken }) => {
-  const user = verifyToken(authToken);
-  const membership = await db.collection('forumGroupMembers').findOne({
-    groupId: ObjectId(groupId),
-    userId: user._id
-  });
-  if (membership) {
-    socket.join(`group:${groupId}`);
-  }
-});
-```
-
-## MongoDB Indexes
-
-### Essential Indexes
-
-```javascript
-// Users
+// User
 db.users.createIndex({ email: 1 }, { unique: true });
 db.users.createIndex({ role: 1, status: 1 });
+db.users.createIndex({ googleId: 1 }, { sparse: true, unique: true });
 
-// Expert profiles
-db.users.createIndex({ "expert.approval.status": 1 });
-db.users.createIndex({ "expert.specialties": 1 });
+// OTP
+db.otps.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+db.otps.createIndex({ email: 1 });
 
-// Forum posts
+// Forum & Discussion
 db.forumPosts.createIndex({ forumId: 1, status: 1, createdAt: -1 });
-db.forumPosts.createIndex({ authorId: 1 });
-db.forumPosts.createIndex({ tags: 1 });
-db.forumPosts.createIndex({ title: "text", content: "text" }); // Full-text search
+db.forumPosts.createIndex({ title: "text", content: "text", tags: "text" });
+db.forumComments.createIndex({ postId: 1, status: 1 });
 
-// Forum groups
-db.forumGroupMessages.createIndex({ groupId: 1, createdAt: 1 });
-db.forumGroupMembers.createIndex({ groupId: 1, userId: 1 }, { unique: true });
-
-// Appointments
+// Expert Slots & Appointments
+db.expertSlots.createIndex({ expertId: 1, startAt: 1 });
+db.expertSlots.createIndex({ status: 1 });
 db.appointments.createIndex({ studentId: 1, status: 1 });
 db.appointments.createIndex({ expertId: 1, status: 1 });
 db.appointments.createIndex({ slotId: 1 });
 
-// Expert slots
-db.expertSlots.createIndex({ expertId: 1, startAt: 1 });
-db.expertSlots.createIndex({ status: 1, startAt: 1 });
-
 // Chat
-db.chatMessages.createIndex({ chatRoomId: 1, createdAt: 1 });
-db.chatRooms.createIndex({ studentId: 1, status: 1 });
+db.chatRooms.createIndex({ 'participants.userId': 1, status: 1 });
+db.chatRooms.createIndex({ type: 1, appointmentId: 1 });
+db.chatMessages.createIndex({ chatRoomId: 1, createdAt: -1 });
+db.chatInvitations.createIndex({ chatRoomId: 1, invitedUserId: 1 });
+db.chatInvitations.createIndex({ invitedUserId: 1, status: 1 });
 
-// Notifications
-db.notifications.createIndex({ userId: 1, status: 1, createdAt: -1 });
+// Financial & Ledger
+db.payments.createIndex({ userId: 1, createdAt: -1 });
+db.payments.createIndex({ status: 1 });
+db.payments.createIndex({ orderCode: 1 }, { unique: true });
+db.creditTransactions.createIndex({ studentId: 1, createdAt: -1 });
 
-// Reports
-db.reports.createIndex({ status: 1, priority: 1 });
+// Moderation & Audit
+db.reports.createIndex({ status: 1, createdAt: -1 });
 db.reports.createIndex({ targetType: 1, targetId: 1 });
+db.logs.createIndex({ actorId: 1, createdAt: -1 });
+db.logs.createIndex({ action: 1, createdAt: -1 });
 ```
 
-## MVP Build Order
+---
 
-1. MongoDB setup, Mongoose ODM, connection pooling
-2. JWT authentication with Passport.js
-3. User roles and basic profile management
-4. Expert onboarding and admin approval workflow
-5. Forum categories, posts, comments
-6. Forum group discussions with real-time Socket.io + Change Streams
-7. Reports and admin moderation
-8. Notifications system
-9. File upload with GridFS or S3 integration
-10. Expert search with MongoDB aggregation pipelines
-11. Subscription plans, student subscriptions, wallets, credit transactions
-12. Expert availability, slots, and appointments
-13. Chat rooms and messages
-14. Organizations, managers, join codes, and credit allocation
-15. Analytics summaries and logs
+## 5. Collections Mở Rộng / Dự Kiến (Prospective Architecture Collections)
 
-## Migration Notes
-
-When migrating from Firestore:
-
-1. **Collections**: Convert Firestore collections to MongoDB collections
-2. **Subcollections**: Convert to separate collections with parent reference fields
-3. **Document IDs**: Convert Firestore auto-ids to MongoDB ObjectIds
-4. **Timestamps**: Convert Firestore Timestamps to JavaScript Date objects
-5. **Security Rules**: Replace with API authorization middleware
-6. **Real-time Listeners**: Replace with Socket.io + MongoDB Change Streams
-7. **Queries**: Adapt Firestore queries to MongoDB aggregation pipelines
-8. **Transactions**: Use MongoDB multi-document ACID transactions where needed
-
-Expert weekly schedule settings.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  weeklySchedule: Object, // configuration for weekly recurring slots
-  blockedDates: [Date],
-  slotDurationMinutes: Number,
-  bufferMinutes: Number,
-  maxSessionsPerDay: Number,
-  autoGenerateSlots: Boolean,
-  generatedUntil: Date,
-  updatedAt: Date
-}
-```
-
-### expertSlots
-
-Concrete bookable slots generated from availability.
-
-```javascript
-{
-  _id: ObjectId,
-  expertId: ObjectId,
-  startAt: Date,
-  endAt: Date,
-  status: String, // available | locked | booked | cancelled | expired
-  appointmentId: ObjectId,
-  lockedByStudentId: ObjectId,
-  lockedUntil: Date,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### appointments
-
-Consultation booking.
-
-```javascript
-{
-  _id: ObjectId,
-  studentId: ObjectId,
-  expertId: ObjectId,
-  slotId: ObjectId,
-  subscriptionId: ObjectId,
-  status: String, // confirmed | in_progress | completed | cancelled | no_show | rescheduled
-  creditSource: String, // subscription | purchased_package | volunteer_free | organization
-  creditType: String, // expert_session | free_expert_session
-  creditStatus: String, // locked | used | released
-  scheduledStartAt: Date,
-  scheduledEndAt: Date,
-  expertJoinedAt: Date,
-  studentJoinedAt: Date,
-  actualStartAt: Date,
-  actualEndAt: Date,
-  expertSessionRate: Number,
-  platformFeeRate: Number,
-  platformFeeAmount: Number,
-  expertPayoutAmount: Number,
-  payoutStatus: String, // pending | payable | paid | withheld
-  studentNote: String,
-  expertNote: String,
-  cancellation: {
-    cancelledBy: ObjectId,
-    cancelledByRole: String,
-    reason: String,
-    cancelledAt: Date,
-    creditRefunded: Boolean
-  },
-  rescheduleOfAppointmentId: ObjectId,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
+Các collection dưới đây nằm trong định hướng phát triển tính năng mở rộng (như Khảo sát tổ chức, AI Chat tự động nâng cao, phòng cấp cứu Crisis, cấp phát hạn mức Doanh nghiệp...):
+- `organizations`, `organizationMembers`, `organizationSubscriptions`, `organizationCreditAllocations`, `organizationInvitations`, `organizationJoinCodes`.
+- `supportRequests`, `expertOnCallStatus`.
+- `files` (Quản lý metadata file tập trung nâng cao ngoài GridFS).
+- `platformSettings`, `policyVersions`, `userConsents`.
+- `analyticsDaily`, `expertAnalyticsDaily`, `organizationAnalyticsDaily`.
