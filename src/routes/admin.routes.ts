@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middlewares/auth.middleware';
-import { approveExpert, getPendingExperts, getReports, rejectExpert, resolveReport, createForum, updateForum, deleteForumPost, deleteForum, deleteForumComment, listForumPosts, getForumPost, downloadExpertCredential } from '../controllers/admin.controller';
+import { approveExpert, getPendingExperts, getReports, rejectExpert, resolveReport, createForum, updateForum, deleteForumPost, deleteForum, deleteForumComment, listForumPosts, getForumPost, downloadExpertCredential, listUsers, updateUserRole, banUser, unbanUser } from '../controllers/admin.controller';
 import {
   adminListCreditPackages,
   adminCreateCreditPackage,
@@ -18,6 +18,12 @@ const router = Router();
 
 router.use(requireAuth);
 router.use(requireRole('admin'));
+
+// ─── User Role & Permission Management ────────────────────────────────────
+router.get('/users', listUsers);
+router.put('/users/:id/role', updateUserRole);
+router.post('/users/:id/ban', banUser);
+router.post('/users/:id/unban', unbanUser);
 
 router.post('/forums', createForum);
 router.patch('/forums/:forumId', updateForum);

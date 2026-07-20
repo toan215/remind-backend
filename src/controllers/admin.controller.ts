@@ -10,6 +10,7 @@ import { downloadFromGridFS } from '../services/gridfs.service';
 import Notification, { NotificationType } from '../models/notification.model';
 import type { ReportStatus } from '../types/common';
 
+
 const isValidObjectId = (id: string | undefined): boolean => {
   if (!id) return false;
   return mongoose.Types.ObjectId.isValid(id);
@@ -529,5 +530,218 @@ export const resolveReport: RequestHandler = async (req, res) => {
   } catch (err) {
     console.error('resolveReport error:', err);
     return res.status(500).json({ error: 'Failed to resolve report' });
+  }
+};
+
+// ─── User Role & Permission Management ────────────────────────────────────────
+
+/**
+ * GET /admin/users
+ * Lấy danh sách tất cả người dùng, hỗ trợ lọc theo role, status, và từ khóa tìm kiếm.
+ */
+export const listUsers: RequestHandler = async (req, res) => {
+  try {
+    const role = req.query.role as string | undefined;
+    const status = req.query.status as string | undefined;
+    const q = req.query.q as string | undefined;
+    const filter: Record<string, unknown> = {};
+
+    if (role && ['student', 'expert', 'admin', 'system_manager'].includes(role)) {
+      filter.role = role;
+    }
+    if (status && ['active', 'pending', 'rejected', 'banned'].includes(status)) {
+      filter.status = status;
+    }
+    if (q && q.trim().length > 0) {
+      const regex = new RegExp(q.trim(), 'i');
+      filter.$or = [{ fullName: regex }, { email: regex }];
+    }
+
+    const users = await User.find(filter)
+      .select('email fullName role status avatar createdAt isValidatedExpert')
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    const formatted = users.map((u) => ({
+      _id: u._id.toString(),
+      id: u._id.toString(),
+      email: u.email,
+      fullName: u.fullName || '',
+      role: u.role,
+      status: u.status,
+      avatar: u.avatar || '',
+      createdAt: u.createdAt,
+    }));
+
+    return res.status(200).json({ users: formatted });
+  } catch (err) {
+    console.error('listUsers error:', err);
+    return res.status(500).json({ error: 'Failed to fetch users' });
+  }
+};
+
+/**
+ * PUT /admin/users/:id/role
+ * Cập nhật vai trò của người dùng (student | expert | admin | system_manager).
+ */
+export const updateUserRole: RequestHandler = async (req, res) => {
+  const id = req.params.id as string | undefined;
+  const { role } = req.body;
+  const adminId = req.user?.id;
+
+  if (!isValidObjectId(id)) {
+    return res.status(400).json({ error: 'Invalid user id' });
+  }
+  if (!role || !['student', 'expert', 'admin', 'system_manager'].includes(role)) {
+    return res.status(400).json({ error: 'Invalid role. Must be one of: student, expert, admin, system_manager' });
+  }
+
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const previousRole = user.role;
+    user.role = role;
+
+    // Nếu hạ cấp từ expert xuống, reset isValidatedExpert
+    if (role !== 'expert') {
+      user.isValidatedExpert = false;
+    }
+
+    await user.save();
+
+    if (adminId) {
+      await writeLog(
+        new mongoose.Types.ObjectId(adminId),
+        req.user?.role || 'admin',
+        'user.updateRole',
+        'user',
+        user._id,
+        { previousRole, newRole: role }
+      );
+    }
+
+    return res.status(200).json({
+      message: `Đã cập nhật vai trò người dùng thành "${role}"`,
+      user: {
+        _id: user._id.toString(),
+        id: user._id.toString(),
+        email: user.email,
+        fullName: user.fullName || '',
+        role: user.role,
+        status: user.status,
+        avatar: user.avatar || '',
+      },
+    });
+  } catch (err) {
+    console.error('updateUserRole error:', err);
+    return res.status(500).json({ error: 'Failed to update user role' });
+  }
+};
+
+/**
+ * POST /admin/users/:id/ban
+ * Khóa tài khoản người dùng.
+ */
+export const banUser: RequestHandler = async (req, res) => {
+  const id = req.params.id as string | undefined;
+  const adminId = req.user?.id;
+
+  if (!isValidObjectId(id)) {
+    return res.status(400).json({ error: 'Invalid user id' });
+  }
+
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if ((user.status as string) === 'banned') {
+      return res.status(409).json({ error: 'User is already banned' });
+    }
+
+    user.status = 'banned';
+    await user.save();
+
+    if (adminId) {
+      await writeLog(
+        new mongoose.Types.ObjectId(adminId),
+        req.user?.role || 'admin',
+        'user.ban',
+        'user',
+        user._id
+      );
+    }
+
+    return res.status(200).json({
+      message: `Đã khóa tài khoản ${user.email}`,
+      user: {
+        _id: user._id.toString(),
+        id: user._id.toString(),
+        email: user.email,
+        fullName: user.fullName || '',
+        role: user.role,
+        status: user.status,
+        avatar: user.avatar || '',
+      },
+    });
+  } catch (err) {
+    console.error('banUser error:', err);
+    return res.status(500).json({ error: 'Failed to ban user' });
+  }
+};
+
+/**
+ * POST /admin/users/:id/unban
+ * Mở khóa tài khoản người dùng.
+ */
+export const unbanUser: RequestHandler = async (req, res) => {
+  const id = req.params.id as string | undefined;
+  const adminId = req.user?.id;
+
+  if (!isValidObjectId(id)) {
+    return res.status(400).json({ error: 'Invalid user id' });
+  }
+
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if ((user.status as string) !== 'banned') {
+      return res.status(409).json({ error: 'User is not banned' });
+    }
+
+    user.status = 'active';
+    await user.save();
+
+    if (adminId) {
+      await writeLog(
+        new mongoose.Types.ObjectId(adminId),
+        req.user?.role || 'admin',
+        'user.unban',
+        'user',
+        user._id
+      );
+    }
+
+    return res.status(200).json({
+      message: `Đã mở khóa tài khoản ${user.email}`,
+      user: {
+        _id: user._id.toString(),
+        id: user._id.toString(),
+        email: user.email,
+        fullName: user.fullName || '',
+        role: user.role,
+        status: user.status,
+        avatar: user.avatar || '',
+      },
+    });
+  } catch (err) {
+    console.error('unbanUser error:', err);
+    return res.status(500).json({ error: 'Failed to unban user' });
   }
 };
